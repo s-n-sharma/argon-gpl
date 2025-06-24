@@ -1,7 +1,8 @@
 use gpui::{
     div, App, BorderStyle, Bounds, Context, Corners, DefiniteLength, Edges, Element, Entity,
-    InteractiveElement, IntoElement, Length, MouseButton, MouseDownEvent, PaintQuad, ParentElement,
-    Pixels, Point, Render, Rgba, Size, Style, Styled, Window,
+    InteractiveElement, IntoElement, Length, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PaintQuad, ParentElement, Pixels, Point, Render, Rgba, ScrollWheelEvent, Size,
+    Style, Styled, Window,
 };
 
 #[derive(Copy, Clone, PartialEq)]
@@ -22,6 +23,13 @@ pub struct LayoutCanvas {
     pub offset: Point<Pixels>,
     pub rects: Vec<Rect>,
     pub bg_style: Style,
+    // drag state
+    is_dragging: bool,
+    drag_start: Point<Pixels>,
+    offset_start: Point<Pixels>,
+    // zoom state
+    scale: f32,
+    screen_origin: Point<Pixels>,
 }
 
 impl IntoElement for CanvasElement {
@@ -77,8 +85,11 @@ impl Element for CanvasElement {
         window: &mut gpui::Window,
         cx: &mut gpui::App,
     ) {
+        self.inner
+            .update(cx, |inner, cx| inner.screen_origin = bounds.origin);
         let inner = self.inner.read(cx);
         let rects = inner.rects.clone();
+        let scale = inner.scale;
         let offset = inner.offset;
         inner
             .bg_style
@@ -86,8 +97,10 @@ impl Element for CanvasElement {
             .paint(bounds, window, cx, |window, cx| {
                 for r in rects {
                     let bounds = Bounds::new(
-                        Point::new(Pixels(r.x0), Pixels(r.y0)) + offset + bounds.origin.clone(),
-                        Size::new(Pixels(r.x1 - r.x0), Pixels(r.y1 - r.y0)),
+                        Point::new(scale * Pixels(r.x0), scale * Pixels(r.y0))
+                            + offset
+                            + bounds.origin.clone(),
+                        Size::new(scale * Pixels(r.x1 - r.x0), scale * Pixels(r.y1 - r.y0)),
                     );
                     let color = Rgba {
                         r: 1.,
@@ -117,7 +130,10 @@ impl Render for LayoutCanvas {
         div()
             .flex()
             .size_full()
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down_listener))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .child(CanvasElement {
                 inner: cx.entity().clone(),
             })
@@ -140,20 +156,77 @@ pub(crate) fn test_canvas() -> LayoutCanvas {
             },
             ..Style::default()
         },
+        is_dragging: false,
+        drag_start: Point::default(),
+        offset_start: Point::default(),
+        scale: 1.0,
+        screen_origin: Point::default(),
     }
 }
 
 impl LayoutCanvas {
-    fn on_mouse_down(event: &MouseDownEvent, window: &mut Window, cx: &mut App) {
-        println!("mouse down");
-    }
-    fn on_mouse_down_listener(
+    pub(crate) fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) {
         println!("mouse down");
+        self.is_dragging = true;
+        self.drag_start = event.position;
+        self.offset_start = self.offset;
+    }
+
+    pub(crate) fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_dragging {
+            self.offset = self.offset_start + (event.position - self.drag_start);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn on_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        println!("mouse up");
+        self.is_dragging = false;
+    }
+
+    pub(crate) fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        println!("scroll wheel");
+        if self.is_dragging {
+            // Do not allow zooming during a drag.
+            return;
+        }
+        let new_scale = {
+            let delta = event.delta.pixel_delta(Pixels(20.));
+            let ns = self.scale + delta.y.0 / 400.;
+            f32::clamp(ns, 0.01, 100.)
+        };
+
+        // screen = scale*world + b
+        // world = (screen - b)/scale
+        // (screen-b0)/scale0 = (screen-b1)/scale1
+        // b1 = scale1/scale0*(b0-screen)+screen
+        let a = new_scale / self.scale;
+        let b0 = self.screen_origin + self.offset;
+        let b1 = Point::new(a * (b0.x - event.position.x), a * (b0.y - event.position.y))
+            + event.position;
+        self.offset = b1 - self.screen_origin;
+        self.scale = new_scale;
+
         cx.notify();
     }
 }

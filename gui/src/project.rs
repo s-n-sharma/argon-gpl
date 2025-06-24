@@ -11,23 +11,54 @@ pub struct LayerState {
     pub visible: bool,
 }
 
+pub struct ProjectState {
+    pub layers: Vec<Entity<LayerState>>,
+}
+
 pub struct Project {
+    pub state: Entity<ProjectState>,
+    pub sidebar: Entity<SideBar>,
     pub canvas: Entity<LayoutCanvas>,
-    pub layers: Vec<LayerState>,
 }
 
 impl Project {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|_cx| test_canvas());
-        Self {
-            canvas,
+        let state = cx.new(|cx| ProjectState {
             layers: (0..10)
-                .map(|i| LayerState {
-                    name: format!("met{i}"),
-                    visible: false,
+                .map(|i| {
+                    cx.new(|_cx| LayerState {
+                        name: format!("met{i}"),
+                        visible: false,
+                    })
                 })
                 .collect(),
+        });
+        let sidebar = cx.new(|cx| SideBar::new(cx, state.clone()));
+        let canvas = cx.new(|_cx| test_canvas());
+
+        Self {
+            state,
+            sidebar,
+            canvas,
         }
+    }
+}
+
+impl Project {
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.canvas
+            .update(cx, |canvas, cx| canvas.on_mouse_move(event, window, cx));
+        cx.notify();
+    }
+
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas
+            .update(cx, |canvas, cx| canvas.on_mouse_up(event, window, cx));
     }
 }
 
@@ -37,7 +68,7 @@ impl Render for Project {
             .font_family("Zed Plex Sans")
             .size_full()
             .flex()
-            .flex_col()
+            .flex_col_reverse()
             .justify_start()
             .items_start()
             .border_1()
@@ -46,15 +77,18 @@ impl Render for Project {
             .text_sm()
             .text_color(rgb(0xffffff))
             .overflow_hidden()
-            .child(cx.new(|_cx| TitleBar))
-            .child(cx.new(|_cx| ToolBar))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .child(
                 div()
                     .flex()
+                    .flex_row_reverse()
                     .size_full()
-                    .child(cx.new(|_cx| SideBar))
-                    .child(self.canvas.clone()),
+                    .child(self.canvas.clone())
+                    .child(self.sidebar.clone()),
             )
+            .child(cx.new(|_cx| ToolBar))
+            .child(cx.new(|_cx| TitleBar))
     }
 }
 

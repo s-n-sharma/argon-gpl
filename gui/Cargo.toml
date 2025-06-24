@@ -12,3 +12,4 @@ gpui = { git = "https://github.com/zed-industries/zed" }
 smallvec = "1"
 rust-embed = "8"
 lazy_static = "1"
+itertools = "0.14"
