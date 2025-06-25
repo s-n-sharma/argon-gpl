@@ -129,6 +129,7 @@ impl Render for LayoutCanvas {
     ) -> impl IntoElement {
         div()
             .flex()
+            .flex_1()
             .size_full()
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))

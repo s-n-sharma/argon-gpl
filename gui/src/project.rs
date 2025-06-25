@@ -24,11 +24,11 @@ pub struct Project {
 impl Project {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| ProjectState {
-            layers: (0..10)
+            layers: (0..100)
                 .map(|i| {
                     cx.new(|_cx| LayerState {
-                        name: format!("met{i}"),
-                        visible: false,
+                        name: format!("met abcdasldfkjasdlfkjasdlfkjasdf {i}"),
+                        visible: true,
                     })
                 })
                 .collect(),
@@ -68,27 +68,27 @@ impl Render for Project {
             .font_family("Zed Plex Sans")
             .size_full()
             .flex()
-            .flex_col_reverse()
+            .flex_col()
             .justify_start()
-            .items_start()
             .border_1()
             .border_color(THEME.divider)
             .rounded(px(10.))
             .text_sm()
             .text_color(rgb(0xffffff))
-            .overflow_hidden()
+            .whitespace_nowrap()
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .child(cx.new(|_cx| TitleBar))
+            .child(cx.new(|_cx| ToolBar))
             .child(
                 div()
                     .flex()
-                    .flex_row_reverse()
-                    .size_full()
-                    .child(self.canvas.clone())
-                    .child(self.sidebar.clone()),
+                    .flex_row()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.sidebar.clone())
+                    .child(self.canvas.clone()),
             )
-            .child(cx.new(|_cx| ToolBar))
-            .child(cx.new(|_cx| TitleBar))
     }
 }
 

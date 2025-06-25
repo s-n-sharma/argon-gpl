@@ -1,4 +1,6 @@
+use gpui::prelude::*;
 use gpui::*;
+
 use itertools::Itertools;
 
 use crate::{
@@ -35,9 +37,7 @@ impl Render for ToolBar {
         div()
             .border_b_1()
             .border_color(THEME.divider)
-            .flex()
             .h(px(34.))
-            .w_full()
             .bg(THEME.sidebar)
             .child("Tools")
     }
@@ -48,6 +48,7 @@ pub struct SideBar {
 }
 
 pub struct LayerControl {
+    clicked: bool,
     state: Entity<LayerState>,
 }
 
@@ -62,7 +63,7 @@ impl SideBar {
 
         let layers = layers
             .into_iter()
-            .map(|layer| cx.new(|_cx| LayerControl { state: layer }))
+            .map(|layer| cx.new(|cx| LayerControl::new(cx, layer)))
             .collect();
 
         Self { layers }
@@ -70,13 +71,18 @@ impl SideBar {
 }
 
 impl LayerControl {
-    fn on_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        println!("test")
+    pub fn new(cx: &mut Context<Self>, state: Entity<LayerState>) -> Self {
+        Self {
+            clicked: false,
+            state,
+        }
+    }
+    fn on_click(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        println!("test");
+        self.state.update(cx, |state, cx| {
+            state.visible = !state.visible;
+            cx.notify();
+        });
     }
 }
 
@@ -84,8 +90,9 @@ impl Render for LayerControl {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
         div()
-            .w_full()
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .id("layer_control")
+            .flex()
+            .on_click(cx.listener(Self::on_click))
             .child(format!(
                 "{} - {}",
                 &state.name,
@@ -103,13 +110,28 @@ impl Render for SideBar {
         div()
             .flex()
             .flex_col()
-            .overflow_hidden()
             .h_full()
             .w(px(200.))
             .border_r_1()
             .border_color(THEME.divider)
             .bg(THEME.sidebar)
+            .min_h_0()
             .child("Layers")
-            .children(self.layers.iter().map(|layer| layer.clone()))
+            .child(
+                div()
+                    .flex()
+                    .size_full()
+                    .items_start()
+                    .id("layers_scroll_vert")
+                    .overflow_scroll()
+                    .child(
+                        div().flex().child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .children(self.layers.iter().map(|layer| layer.clone())),
+                        ),
+                    ),
+            )
     }
 }
