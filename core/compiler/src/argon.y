@@ -12,6 +12,7 @@ Decls -> Result<Vec<Decl<'input, ParseMetadata>>, ()>:
 Decl -> Result<Decl<'input, ParseMetadata>, ()>
   : EnumDecl { Ok(Decl::Enum($1?)) }
   | CellDecl { Ok(Decl::Cell($1?)) }
+  | FnDecl { Ok(Decl::Fn($1?)) }
   | ConstantDecl { Ok(Decl::Constant($1?)) }
   ;
 
@@ -23,6 +24,12 @@ FloatLiteral -> Result<FloatLiteral, ()>
   : 'FLOATLIT' {
   let v = $1.map_err(|_| ())?;
   Ok(FloatLiteral { span: v.span(), value: parse_float($lexer.span_str(v.span()))?, }) }
+  ;
+
+IntLiteral -> Result<IntLiteral, ()>
+  : 'INTLIT' {
+  let v = $1.map_err(|_| ())?;
+  Ok(IntLiteral { span: v.span(), value: parse_int($lexer.span_str(v.span()))?, }) }
   ;
 
 EnumDecl -> Result<EnumDecl<'input, ParseMetadata>, ()>
@@ -69,6 +76,19 @@ CellDecl -> Result<CellDecl<'input, ParseMetadata>, ()>
   }
   ;
 
+FnDecl -> Result<FnDecl<'input, ParseMetadata>, ()>
+  : 'FN' Ident '(' ArgDecls ')' '->' Ident Scope
+  {
+    Ok(FnDecl {
+      name: $2?,
+      args: $4?,
+      scope: $8?,
+      return_ty: $7?,
+      metadata: (),
+    })
+  }
+  ;
+
 Statements -> Result<Vec<Statement<'input, ParseMetadata>>, ()>:
   Statements Statement {
     let mut __tmp = $1?;
@@ -109,6 +129,7 @@ Scope -> Result<Scope<'input, ParseMetadata>, ()>
           span: $span,
           stmts: __stmts,
           tail: Some(value),
+          metadata: (),
         })
       }
     }
@@ -116,6 +137,7 @@ Scope -> Result<Scope<'input, ParseMetadata>, ()>
       span: $span,
       stmts: __stmts,
       tail: None,
+      metadata: (),
     })
   }
   | '{' Statements NonBlockExpr '}'
@@ -124,6 +146,7 @@ Scope -> Result<Scope<'input, ParseMetadata>, ()>
       span: $span,
       stmts: $2?,
       tail: Some($3?),
+      metadata: (),
     })
   }
   ;
@@ -161,13 +184,21 @@ Term -> Result<Expr<'input, ParseMetadata>, ()>
   ;
 
 Factor -> Result<Expr<'input, ParseMetadata>, ()>
+  : '!' Factor { Ok(Expr::UnaryOp(Box::new(UnaryOpExpr { op: UnaryOp::Not, operand: $2?, span: $span, metadata: () }))) }
+  | '-' Factor { Ok(Expr::UnaryOp(Box::new(UnaryOpExpr { op: UnaryOp::Neg, operand: $2?, span: $span, metadata: () }))) }
+  | SubFactor { Ok($1?) }
+  ;
+
+SubFactor -> Result<Expr<'input, ParseMetadata>, ()>
   : '(' Expr ')' { $2 }
-  | Factor '.' Ident { Ok(Expr::FieldAccess(Box::new(FieldAccessExpr { base: $1?, field: $3?, span: $span, metadata: (), }))) }
   | CallExpr { Ok(Expr::Call($1?)) }
-  | Factor '!' { Ok(Expr::Emit(Box::new(EmitExpr { value: $1?, span: $span, metadata: (), }))) }
+  | SubFactor '.' Ident { Ok(Expr::FieldAccess(Box::new(FieldAccessExpr { base: $1?, field: $3?, span: $span, metadata: (), }))) }
+  | SubFactor '!' { Ok(Expr::Emit(Box::new(EmitExpr { value: $1?, span: $span, metadata: (), }))) }
   | Ident '::' Ident { Ok(Expr::EnumValue(EnumValue {name: $1?, variant: $3?, span: $span, metadata: (), } )) }
   | Ident { Ok(Expr::Var(VarExpr { name: $1?, metadata: (), })) }
+  | IntLiteral { Ok(Expr::IntLiteral($1?)) }
   | FloatLiteral { Ok(Expr::FloatLiteral($1?)) }
+  | SubFactor 'AS' Ident { Ok(Expr::Cast(Box::new(CastExpr { value: $1?, ty: $3?, span: $span, metadata: (), }))) }
   ;
 
 
@@ -195,16 +226,12 @@ ArgDecls1 -> Result<Vec<ArgDecl<'input, ParseMetadata>>, ()>
   ;
 
 ArgDecl -> Result<ArgDecl<'input, ParseMetadata>, ()>
-  : Ident ':' Typ { Ok(ArgDecl { name: $1?, ty: $3?, metadata: () }) }
-  ;
-
-Typ -> Result<Typ<'input, ParseMetadata>, ()>
-  : 'FLOAT' { Ok(Typ::Float) }
-  | Ident { Ok(Typ::Ident($1?)) }
+  : Ident ':' Ident { Ok(ArgDecl { name: $1?, ty: $3?, metadata: () }) }
   ;
 
 Args -> Result<Args<'input, ParseMetadata>, ()>
   : PosArgsTrailingComma KwArgs { Ok(Args { posargs: $1?, kwargs: $2?, metadata: (), }) }
+  | KwArgs { Ok(Args { posargs: Vec::new(), kwargs: $1?, metadata: (), }) }
   | PosArgs { Ok(Args { posargs: $1?, kwargs: Vec::new(), metadata: (), }) }
   ;
 

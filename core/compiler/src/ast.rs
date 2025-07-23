@@ -14,6 +14,7 @@ pub enum Decl<'a, T: AstMetadata> {
     Enum(EnumDecl<'a, T>),
     Constant(ConstantDecl<'a, T>),
     Cell(CellDecl<'a, T>),
+    Fn(FnDecl<'a, T>),
 }
 
 #[derive_where(Debug, Clone)]
@@ -27,6 +28,12 @@ pub struct Ident<'a, T: AstMetadata> {
 pub struct FloatLiteral {
     pub span: Span,
     pub value: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IntLiteral {
+    pub span: Span,
+    pub value: i64,
 }
 
 #[derive_where(Debug, Clone)]
@@ -45,6 +52,15 @@ pub struct CellDecl<'a, T: AstMetadata> {
 }
 
 #[derive_where(Debug, Clone)]
+pub struct FnDecl<'a, T: AstMetadata> {
+    pub name: Ident<'a, T>,
+    pub args: Vec<ArgDecl<'a, T>>,
+    pub return_ty: Ident<'a, T>,
+    pub scope: Scope<'a, T>,
+    pub metadata: T::FnDecl,
+}
+
+#[derive_where(Debug, Clone)]
 pub struct ConstantDecl<'a, T: AstMetadata> {
     pub name: Ident<'a, T>,
     pub ty: Ident<'a, T>,
@@ -57,6 +73,7 @@ pub struct Scope<'a, T: AstMetadata> {
     pub span: Span,
     pub stmts: Vec<Statement<'a, T>>,
     pub tail: Option<Expr<'a, T>>,
+    pub metadata: T::Scope,
 }
 
 #[derive_where(Debug, Clone)]
@@ -82,6 +99,12 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum UnaryOp {
+    Not,
+    Neg,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ComparisonOp {
     Eq,
     Ne,
@@ -96,13 +119,16 @@ pub enum Expr<'a, T: AstMetadata> {
     If(Box<IfExpr<'a, T>>),
     Comparison(Box<ComparisonExpr<'a, T>>),
     BinOp(Box<BinOpExpr<'a, T>>),
+    UnaryOp(Box<UnaryOpExpr<'a, T>>),
     Call(CallExpr<'a, T>),
     Emit(Box<EmitExpr<'a, T>>),
     EnumValue(EnumValue<'a, T>),
     FieldAccess(Box<FieldAccessExpr<'a, T>>),
     Var(VarExpr<'a, T>),
     FloatLiteral(FloatLiteral),
+    IntLiteral(IntLiteral),
     Scope(Box<Scope<'a, T>>),
+    Cast(Box<CastExpr<'a, T>>),
 }
 
 #[derive_where(Debug, Clone)]
@@ -127,6 +153,14 @@ pub struct BinOpExpr<'a, T: AstMetadata> {
     pub right: Expr<'a, T>,
     pub span: Span,
     pub metadata: T::BinOpExpr,
+}
+
+#[derive_where(Debug, Clone)]
+pub struct UnaryOpExpr<'a, T: AstMetadata> {
+    pub op: UnaryOp,
+    pub operand: Expr<'a, T>,
+    pub span: Span,
+    pub metadata: T::UnaryOpExpr,
 }
 
 #[derive_where(Debug, Clone)]
@@ -187,21 +221,24 @@ pub struct KwArgValue<'a, T: AstMetadata> {
 #[derive_where(Debug, Clone)]
 pub struct ArgDecl<'a, T: AstMetadata> {
     pub name: Ident<'a, T>,
-    pub ty: Typ<'a, T>,
+    pub ty: Ident<'a, T>,
     pub metadata: T::ArgDecl,
 }
 
 #[derive_where(Debug, Clone)]
-pub enum Typ<'a, T: AstMetadata> {
-    Float,
-    Ident(Ident<'a, T>),
+pub struct CastExpr<'a, T: AstMetadata> {
+    pub value: Expr<'a, T>,
+    pub ty: Ident<'a, T>,
+    pub span: Span,
+    pub metadata: T::CastExpr,
 }
 
 pub(crate) fn parse_float(s: &str) -> Result<f64, ()> {
-    match s.parse::<f64>() {
-        Ok(val) => Ok(val),
-        Err(_) => Err(()),
-    }
+    s.parse::<f64>().map_err(|_| ())
+}
+
+pub(crate) fn parse_int(s: &str) -> Result<i64, ()> {
+    s.parse::<i64>().map_err(|_| ())
 }
 
 pub(crate) fn flatten<T>(lhs: Result<Vec<T>, ()>, rhs: Result<T, ()>) -> Result<Vec<T>, ()> {
@@ -216,13 +253,16 @@ impl<'a, T: AstMetadata> Expr<'a, T> {
             Self::If(x) => x.span,
             Self::Comparison(x) => x.span,
             Self::BinOp(x) => x.span,
+            Self::UnaryOp(x) => x.span,
             Self::Call(x) => x.span,
             Self::Emit(x) => x.span,
             Self::EnumValue(x) => x.span,
             Self::FieldAccess(x) => x.span,
             Self::Var(x) => x.name.span,
             Self::FloatLiteral(x) => x.span,
+            Self::IntLiteral(x) => x.span,
             Self::Scope(x) => x.span,
+            Self::Cast(x) => x.span,
         }
     }
 }
@@ -232,10 +272,12 @@ pub trait AstMetadata {
     type VarExpr: Debug + Clone;
     type EnumDecl: Debug + Clone;
     type CellDecl: Debug + Clone;
+    type FnDecl: Debug + Clone;
     type ConstantDecl: Debug + Clone;
     type LetBinding: Debug + Clone;
     type IfExpr: Debug + Clone;
     type BinOpExpr: Debug + Clone;
+    type UnaryOpExpr: Debug + Clone;
     type ComparisonExpr: Debug + Clone;
     type FieldAccessExpr: Debug + Clone;
     type EnumValue: Debug + Clone;
@@ -244,7 +286,9 @@ pub trait AstMetadata {
     type Args: Debug + Clone;
     type KwArgValue: Debug + Clone;
     type ArgDecl: Debug + Clone;
+    type Scope: Debug + Clone;
     type Typ: Debug + Clone;
+    type CastExpr: Debug + Clone;
 }
 
 pub trait AstTransformer<'a> {
@@ -273,6 +317,14 @@ pub trait AstTransformer<'a> {
         args: &Vec<ArgDecl<'a, Self::Output>>,
         stmts: &Vec<Statement<'a, Self::Output>>,
     ) -> <Self::Output as AstMetadata>::CellDecl;
+    fn dispatch_fn_decl(
+        &mut self,
+        input: &FnDecl<'a, Self::Input>,
+        name: &Ident<'a, Self::Output>,
+        args: &Vec<ArgDecl<'a, Self::Output>>,
+        return_ty: &Ident<'a, Self::Output>,
+        scope: &Scope<'a, Self::Output>,
+    ) -> <Self::Output as AstMetadata>::FnDecl;
     fn dispatch_constant_decl(
         &mut self,
         input: &ConstantDecl<'a, Self::Input>,
@@ -299,12 +351,23 @@ pub trait AstTransformer<'a> {
         left: &Expr<'a, Self::Output>,
         right: &Expr<'a, Self::Output>,
     ) -> <Self::Output as AstMetadata>::BinOpExpr;
+    fn dispatch_unary_op_expr(
+        &mut self,
+        input: &UnaryOpExpr<'a, Self::Input>,
+        operand: &Expr<'a, Self::Output>,
+    ) -> <Self::Output as AstMetadata>::UnaryOpExpr;
     fn dispatch_comparison_expr(
         &mut self,
         input: &ComparisonExpr<'a, Self::Input>,
         left: &Expr<'a, Self::Output>,
         right: &Expr<'a, Self::Output>,
     ) -> <Self::Output as AstMetadata>::ComparisonExpr;
+    fn dispatch_cast(
+        &mut self,
+        input: &CastExpr<'a, Self::Input>,
+        value: &Expr<'a, Self::Output>,
+        ty: &Ident<'a, Self::Output>,
+    ) -> <Self::Output as AstMetadata>::CastExpr;
     fn dispatch_field_access_expr(
         &mut self,
         input: &FieldAccessExpr<'a, Self::Input>,
@@ -344,8 +407,14 @@ pub trait AstTransformer<'a> {
         &mut self,
         input: &ArgDecl<'a, Self::Input>,
         name: &Ident<'a, Self::Output>,
-        ty: &Typ<'a, Self::Output>,
+        ty: &Ident<'a, Self::Output>,
     ) -> <Self::Output as AstMetadata>::ArgDecl;
+    fn dispatch_scope(
+        &mut self,
+        input: &Scope<'a, Self::Input>,
+        stmts: &Vec<Statement<'a, Self::Output>>,
+        tail: &Option<Expr<'a, Self::Output>>,
+    ) -> <Self::Output as AstMetadata>::Scope;
     fn enter_scope(&mut self, input: &Scope<'a, Self::Input>);
     fn exit_scope(&mut self, input: &Scope<'a, Self::Input>, output: &Scope<'a, Self::Output>);
 
@@ -402,6 +471,24 @@ pub trait AstTransformer<'a> {
             name,
             args,
             stmts,
+            metadata,
+        }
+    }
+    fn transform_fn_decl(&mut self, input: &FnDecl<'a, Self::Input>) -> FnDecl<'a, Self::Output> {
+        let name = self.transform_ident(&input.name);
+        let args = input
+            .args
+            .iter()
+            .map(|arg| self.transform_arg_decl(arg))
+            .collect();
+        let return_ty = self.transform_ident(&input.return_ty);
+        let scope = self.transform_scope(&input.scope);
+        let metadata = self.dispatch_fn_decl(input, &name, &args, &return_ty, &scope);
+        FnDecl {
+            name,
+            args,
+            return_ty,
+            scope,
             metadata,
         }
     }
@@ -472,6 +559,19 @@ pub trait AstTransformer<'a> {
             metadata,
             left,
             right,
+        }
+    }
+    fn transform_unary_op_expr(
+        &mut self,
+        input: &UnaryOpExpr<'a, Self::Input>,
+    ) -> UnaryOpExpr<'a, Self::Output> {
+        let operand = self.transform_expr(&input.operand);
+        let metadata = self.dispatch_unary_op_expr(&input, &operand);
+        UnaryOpExpr {
+            op: input.op,
+            span: input.span,
+            metadata,
+            operand,
         }
     }
     fn transform_comparison_expr(
@@ -577,21 +677,17 @@ pub trait AstTransformer<'a> {
             metadata,
         }
     }
+
     fn transform_arg_decl(
         &mut self,
         input: &ArgDecl<'a, Self::Input>,
     ) -> ArgDecl<'a, Self::Output> {
         let name = self.transform_ident(&input.name);
-        let ty = self.transform_typ(&input.ty);
+        let ty = self.transform_ident(&input.ty);
         let metadata = self.dispatch_arg_decl(input, &name, &ty);
         ArgDecl { name, ty, metadata }
     }
-    fn transform_typ(&mut self, input: &Typ<'a, Self::Input>) -> Typ<'a, Self::Output> {
-        match input {
-            Typ::Float => Typ::Float,
-            Typ::Ident(ident) => Typ::Ident(self.transform_ident(ident)),
-        }
-    }
+
     fn transform_scope(&mut self, input: &Scope<'a, Self::Input>) -> Scope<'a, Self::Output> {
         self.enter_scope(input);
         let stmts = input
@@ -600,13 +696,27 @@ pub trait AstTransformer<'a> {
             .map(|stmt| self.transform_statement(stmt))
             .collect();
         let tail = input.tail.as_ref().map(|stmt| self.transform_expr(stmt));
+        let metadata = self.dispatch_scope(input, &stmts, &tail);
         let output = Scope {
             span: input.span,
             stmts,
             tail,
+            metadata,
         };
         self.exit_scope(input, &output);
         output
+    }
+
+    fn transform_cast(&mut self, input: &CastExpr<'a, Self::Input>) -> CastExpr<'a, Self::Output> {
+        let value = self.transform_expr(&input.value);
+        let ty = self.transform_ident(&input.ty);
+        let metadata = self.dispatch_cast(&input, &value, &ty);
+        CastExpr {
+            span: input.span,
+            value,
+            ty,
+            metadata,
+        }
     }
 
     fn transform_expr(&mut self, input: &Expr<'a, Self::Input>) -> Expr<'a, Self::Output> {
@@ -614,6 +724,9 @@ pub trait AstTransformer<'a> {
             Expr::If(if_expr) => Expr::If(Box::new(self.transform_if_expr(if_expr))),
             Expr::BinOp(bin_op_expr) => {
                 Expr::BinOp(Box::new(self.transform_bin_op_expr(bin_op_expr)))
+            }
+            Expr::UnaryOp(unary_op_expr) => {
+                Expr::UnaryOp(Box::new(self.transform_unary_op_expr(unary_op_expr)))
             }
             Expr::Comparison(comparison_expr) => {
                 Expr::Comparison(Box::new(self.transform_comparison_expr(comparison_expr)))
@@ -626,7 +739,9 @@ pub trait AstTransformer<'a> {
             )),
             Expr::Var(var_expr) => Expr::Var(self.transform_var_expr(var_expr)),
             Expr::FloatLiteral(float_literal) => Expr::FloatLiteral(*float_literal),
+            Expr::IntLiteral(int_literal) => Expr::IntLiteral(*int_literal),
             Expr::Scope(scope) => Expr::Scope(Box::new(self.transform_scope(scope))),
+            Expr::Cast(cast) => Expr::Cast(Box::new(self.transform_cast(cast))),
         }
     }
 }

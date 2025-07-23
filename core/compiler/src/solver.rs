@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use approx::{assert_relative_eq, relative_eq};
+use approx::{assert_abs_diff_eq, assert_relative_eq, relative_eq};
 use arcstr::ArcStr;
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use itertools::{Either, Itertools};
@@ -25,6 +25,18 @@ pub struct Solver {
     solved_vars: HashMap<Var, f64>,
 }
 
+pub fn substitute_expr(table: &HashMap<Var, f64>, expr: &mut LinearExpr) {
+    let (l, r): (Vec<f64>, Vec<_>) = expr.coeffs.iter().partition_map(|a @ (coeff, var)| {
+        if let Some(s) = table.get(var) {
+            Either::Left(coeff * s)
+        } else {
+            Either::Right(*a)
+        }
+    });
+    expr.coeffs = r;
+    expr.constant += l.into_iter().reduce(|a, b| a + b).unwrap_or(0.);
+}
+
 impl Solver {
     pub fn new() -> Self {
         Default::default()
@@ -38,7 +50,8 @@ impl Solver {
 
     /// Constrains the value of `expr` to 0.
     /// TODO: Check if added constraints conflict with existing solution.
-    pub fn constrain_eq0(&mut self, expr: LinearExpr) {
+    pub fn constrain_eq0(&mut self, mut expr: LinearExpr) {
+        substitute_expr(&self.solved_vars, &mut expr);
         self.constraints.push(expr);
     }
 
@@ -60,34 +73,27 @@ impl Solver {
             self.constraints.len(),
             self.constraints.iter().map(|expr| -expr.constant),
         );
-        let p = a.clone().svd(true, true).pseudo_inverse(EPSILON).unwrap();
-        assert_relative_eq!(&(&a * &p * &b), &b, epsilon = EPSILON);
-        let sol = &p * b;
-        println!("{:?}", a);
-        println!("{:?}", p);
-        let variation = DMatrix::identity(n_vars, n_vars) - &p * a;
-        println!("{:?}", variation);
-        let zeros = DVector::zeros(n_vars);
+        let svd = a.clone().svd(true, true);
+        let vt = svd.v_t.as_ref().expect("No V^T matrix");
+        let s = &svd.singular_values;
+        if s[0] < EPSILON {
+            return;
+        }
+        let sol = svd.solve(&b, EPSILON).unwrap();
+
         for i in 0..self.next_id {
-            if relative_eq!(
-                &variation.row(i as usize).transpose(),
-                &zeros,
-                epsilon = EPSILON
-            ) {
+            if !self.solved_vars.contains_key(&Var(i))
+                && relative_eq!(
+                    (vt.transpose() * vt.column(i as usize))[((i as usize), 0)],
+                    1.,
+                    epsilon = EPSILON
+                )
+            {
                 self.solved_vars.insert(Var(i), sol[(i as usize, 0)]);
             }
         }
         for constraint in self.constraints.iter_mut() {
-            let (l, r): (Vec<f64>, Vec<_>) =
-                constraint.coeffs.iter().partition_map(|a @ (coeff, var)| {
-                    if let Some(s) = self.solved_vars.get(var) {
-                        Either::Left(coeff * s)
-                    } else {
-                        Either::Right(*a)
-                    }
-                });
-            constraint.coeffs = r;
-            constraint.constant -= l.into_iter().reduce(|a, b| a + b).unwrap_or(0.);
+            substitute_expr(&self.solved_vars, constraint);
         }
         self.constraints
             .retain(|constraint| !constraint.coeffs.is_empty());
@@ -148,6 +154,26 @@ impl std::ops::Sub<LinearExpr> for LinearExpr {
     }
 }
 
+impl std::ops::Mul<f64> for LinearExpr {
+    type Output = Self;
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self {
+            coeffs: self.coeffs.into_iter().map(|(c, v)| (c * rhs, v)).collect(),
+            constant: self.constant * rhs,
+        }
+    }
+}
+
+impl std::ops::Div<f64> for LinearExpr {
+    type Output = Self;
+    fn div(self, rhs: f64) -> Self::Output {
+        Self {
+            coeffs: self.coeffs.into_iter().map(|(c, v)| (c / rhs, v)).collect(),
+            constant: self.constant / rhs,
+        }
+    }
+}
+
 impl From<Var> for LinearExpr {
     fn from(value: Var) -> Self {
         Self {
@@ -177,24 +203,16 @@ mod tests {
         let y = solver.new_var();
         let z = solver.new_var();
         solver.constrain_eq0(LinearExpr {
-            coeffs: vec![(1., x), (1., y)],
-            constant: 5.,
+            coeffs: vec![(1., x)],
+            constant: -5.,
         });
         solver.constrain_eq0(LinearExpr {
-            coeffs: vec![(1., x), (-1., y)],
-            constant: 2.,
+            coeffs: vec![(1., y), (-1., x)],
+            constant: 0.,
         });
         solver.solve();
-        assert_relative_eq!(
-            *solver.solved_vars.get(&x).unwrap(),
-            -3.5,
-            epsilon = EPSILON
-        );
-        assert_relative_eq!(
-            *solver.solved_vars.get(&y).unwrap(),
-            -1.5,
-            epsilon = EPSILON
-        );
+        assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), 5., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
         assert!(solver.solved_vars.get(&z).is_none());
     }
 }

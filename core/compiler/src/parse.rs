@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 
@@ -20,6 +20,7 @@ impl AstMetadata for ParseMetadata {
     type LetBinding = ();
     type IfExpr = ();
     type BinOpExpr = ();
+    type UnaryOpExpr = ();
     type ComparisonExpr = ();
     type FieldAccessExpr = ();
     type EnumValue = ();
@@ -28,8 +29,11 @@ impl AstMetadata for ParseMetadata {
     type Args = ();
     type KwArgValue = ();
     type ArgDecl = ();
+    type Scope = ();
     type Typ = ();
     type VarExpr = ();
+    type FnDecl = ();
+    type CastExpr = ();
 }
 
 pub fn parse(input: &str) -> Result<Ast<'_, ParseMetadata>, anyhow::Error> {
