@@ -268,7 +268,6 @@ impl LayoutCanvas {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
-        println!("mouse down, starting drag");
         self.is_dragging = true;
         self.drag_start = event.position;
         self.offset_start = self.offset;
@@ -281,7 +280,6 @@ impl LayoutCanvas {
         cx: &mut Context<Self>,
     ) {
         if self.is_dragging {
-            println!("mouse move in drag");
             self.offset = self.offset_start + (event.position - self.drag_start);
         }
         cx.notify();
@@ -295,7 +293,6 @@ impl LayoutCanvas {
         _cx: &mut Context<Self>,
     ) {
         self.is_dragging = false;
-        println!("mouse up, ending drag");
     }
 
     #[allow(unused)]
@@ -306,7 +303,6 @@ impl LayoutCanvas {
         _cx: &mut Context<Self>,
     ) {
         self.is_dragging = false;
-        println!("mouse up, ending drag");
     }
 
     pub(crate) fn on_scroll_wheel(
