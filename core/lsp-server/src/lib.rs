@@ -31,7 +31,8 @@ async fn handle_gui_r(client: Client, uri: Url, gui_r: OwnedReadHalf) {
     let char2pos = |c: usize| {
         let line_idx = match line_lengths.binary_search(&c) {
             Ok(index) | Err(index) => index,
-        }.saturating_sub(1);
+        }
+        .saturating_sub(1);
         Position::new(line_idx as u32, (c - line_lengths[line_idx]) as u32)
     };
     loop {

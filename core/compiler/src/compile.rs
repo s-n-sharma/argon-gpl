@@ -2,7 +2,7 @@
 //!
 //! Pass 1: assign variable IDs/type checking
 //! Pass 3: solving
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use derive_where::derive_where;
 use enumify::enumify;
@@ -20,19 +20,19 @@ use crate::{
     solver::{LinearExpr, Solver, Var},
 };
 
-pub fn compile(input: CompileInput<'_, ParseMetadata>) -> CompiledCell {
-    let pass = VarIdTyPass::new();
+pub fn compile(ast: &Ast<'_, ParseMetadata>, input: CompileInput<'_>) -> CompiledCell {
+    let pass = VarIdTyPass::new(ast);
     let ast = pass.execute(input.clone());
     let input = CompileInput {
-        ast: &ast,
         cell: input.cell,
         params: input.params,
     };
 
-    ExecPass::new().execute(input)
+    ExecPass::new(&ast).execute(input)
 }
 
 pub(crate) struct VarIdTyPass<'a> {
+    ast: &'a Ast<'a, ParseMetadata>,
     next_id: VarId,
     bindings: Vec<HashMap<&'a str, (VarId, Ty)>>,
 }
@@ -96,8 +96,9 @@ impl AstMetadata for VarIdTyMetadata {
 }
 
 impl<'a> VarIdTyPass<'a> {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(ast: &'a Ast<'a, ParseMetadata>) -> Self {
         Self {
+            ast,
             // allocate space for the global namespace
             bindings: vec![HashMap::new()],
             next_id: 1,
@@ -120,17 +121,14 @@ impl<'a> VarIdTyPass<'a> {
         id
     }
 
-    pub(crate) fn execute(
-        mut self,
-        input: CompileInput<'a, ParseMetadata>,
-    ) -> Ast<'a, VarIdTyMetadata> {
+    pub(crate) fn execute(mut self, input: CompileInput<'a>) -> Ast<'a, VarIdTyMetadata> {
         let mut decls = Vec::new();
-        for decl in &input.ast.decls {
+        for decl in &self.ast.decls {
             if let Decl::Fn(f) = decl {
                 decls.push(Decl::Fn(self.transform_fn_decl(f)));
             }
         }
-        let cell = input
+        let cell = self
             .ast
             .decls
             .iter()
@@ -508,9 +506,14 @@ struct Frame {
     parent: Option<FrameId>,
 }
 
+struct CellState {
+    solve_iters: u64,
+    solver: Solver,
+}
+
 struct ExecPass<'a> {
     ast: &'a Ast<'a, VarIdTyMetadata>,
-    solvers: HashMap<CellId, Solver>,
+    cell_states: HashMap<CellId, CellState>,
     values: HashMap<ValueId, DeferValue<'a, VarIdTyMetadata>>,
     deferred: IndexSet<CellValueId>,
     emit: Vec<CellValueId>,
@@ -518,12 +521,11 @@ struct ExecPass<'a> {
     nil_value: ValueId,
     global_frame: FrameId,
     next_id: u64,
-    solve_iters: u64,
     // A stack of cells being evaluated.
     //
     // The first element of this stack is the root cell.
     // the last element of this stack is the current cell.
-    partial_cells: Vec<CellId>,
+    partial_cells: VecDeque<CellId>,
     // TODO: map of cell params to solved cells + cell ID
 }
 
@@ -531,7 +533,7 @@ impl<'a> ExecPass<'a> {
     pub(crate) fn new(ast: &'a Ast<'a, VarIdTyMetadata>) -> Self {
         Self {
             ast,
-            solvers: HashMap::new(),
+            cell_states: HashMap::new(),
             values: HashMap::from_iter([(1, DeferValue::Ready(Value::None))]),
             deferred: Default::default(),
             frames: HashMap::from_iter([(0, Frame::default())]),
@@ -539,8 +541,7 @@ impl<'a> ExecPass<'a> {
             nil_value: 1,
             global_frame: 0,
             next_id: 2,
-            solve_iters: 0,
-            partial_cells: Vec::new(),
+            partial_cells: VecDeque::new(),
         }
     }
 
@@ -553,7 +554,7 @@ impl<'a> ExecPass<'a> {
         }
     }
 
-    pub(crate) fn execute(mut self, input: CompileInput<'a, VarIdTyMetadata>) -> CompiledCell {
+    pub(crate) fn execute(mut self, input: CompileInput<'a>) -> CompiledCell {
         self.execute_cell(input.cell, input.params)
     }
 
@@ -562,13 +563,26 @@ impl<'a> ExecPass<'a> {
         cell: &'a str,
         params: HashMap<&'a str, f64>,
     ) -> CompiledCell {
-        self.execute_start(cell, params);
+        let cell_id = self.alloc_id();
+        self.partial_cells.push_back(cell_id);
+        assert!(
+            self.cell_states
+                .insert(
+                    cell_id,
+                    CellState {
+                        solve_iters: 0,
+                        solver: Solver::new()
+                    }
+                )
+                .is_none()
+        );
+        self.execute_start(cell_id, cell, params);
         let mut require_progress = false;
         let mut progress = false;
         while !self.deferred.is_empty() {
             let deferred = self.deferred.clone();
             progress = false;
-            for vid in deferred.iter().copied() {
+            for (_, vid) in deferred.iter().filter(|(cid, _)| *cid == cell_id).copied() {
                 progress = progress || self.eval_partial(vid);
             }
 
@@ -579,43 +593,47 @@ impl<'a> ExecPass<'a> {
             require_progress = false;
 
             if !progress {
-                self.solve();
+                let state = self.cell_states.get_mut(&cell_id).unwrap();
+                state.solve_iters += 1;
+                state.solver.solve();
                 require_progress = true;
             }
         }
         if progress {
-            self.solve();
+            let state = self.cell_states.get_mut(&cell_id).unwrap();
+            state.solve_iters += 1;
+            state.solver.solve();
         }
+        self.partial_cells
+            .pop_back()
+            .expect("failed to pop cell id");
         CompiledCell {
-            values: self.emit(),
+            values: self.emit(cell_id),
         }
     }
 
-    fn emit(&mut self) -> Vec<SolvedValue> {
+    fn emit(&mut self, cell: CellId) -> Vec<SolvedValue> {
+        let state = self.cell_states.get(&cell).expect("cell not found");
         self.emit
             .iter()
+            .filter_map(|(cid, vid)| if *cid == cell { Some(vid) } else { None })
             .map(|vid| {
                 let value = &self.values[vid];
                 let value = value.as_ref().unwrap_ready();
                 match value {
-                    Value::Linear(l) => SolvedValue::Float(self.solver.eval_expr(l).unwrap()),
+                    Value::Linear(l) => SolvedValue::Float(state.solver.eval_expr(l).unwrap()),
                     Value::Rect(rect) => SolvedValue::Rect(Rect {
                         layer: rect.layer.clone(),
-                        x0: self.solver.value_of(rect.x0).unwrap(),
-                        y0: self.solver.value_of(rect.y0).unwrap(),
-                        x1: self.solver.value_of(rect.x1).unwrap(),
-                        y1: self.solver.value_of(rect.y1).unwrap(),
+                        x0: state.solver.value_of(rect.x0).unwrap(),
+                        y0: state.solver.value_of(rect.y0).unwrap(),
+                        x1: state.solver.value_of(rect.x1).unwrap(),
+                        y1: state.solver.value_of(rect.y1).unwrap(),
                         source: rect.source.clone(),
                     }),
                     _ => unimplemented!(),
                 }
             })
             .collect()
-    }
-
-    fn solve(&mut self) {
-        self.solve_iters += 1;
-        self.solver.solve();
     }
 
     fn value_id(&mut self) -> ValueId {
@@ -636,7 +654,7 @@ impl<'a> ExecPass<'a> {
         id
     }
 
-    fn execute_start(&mut self, cell: &'a str, params: HashMap<&'a str, f64>) {
+    fn execute_start(&mut self, cell_id: CellId, cell: &'a str, params: HashMap<&'a str, f64>) {
         for decl in &self.ast.decls {
             if let Decl::Fn(f) = decl {
                 let vid = self.value_id();
@@ -665,14 +683,14 @@ impl<'a> ExecPass<'a> {
             .expect("cell not found");
 
         for stmt in cell.stmts.iter() {
-            self.eval_stmt(self.global_frame, stmt);
+            self.eval_stmt(cell_id, self.global_frame, stmt);
         }
     }
 
-    fn eval_stmt(&mut self, frame: FrameId, stmt: &Statement<'a, VarIdTyMetadata>) {
+    fn eval_stmt(&mut self, cell: CellId, frame: FrameId, stmt: &Statement<'a, VarIdTyMetadata>) {
         match stmt {
             Statement::LetBinding(binding) => {
-                let value = self.visit_expr(frame, &binding.value);
+                let value = self.visit_expr(cell, frame, &binding.value);
                 self.frames
                     .get_mut(&frame)
                     .unwrap()
@@ -680,12 +698,17 @@ impl<'a> ExecPass<'a> {
                     .insert(binding.metadata, value);
             }
             Statement::Expr { value, .. } => {
-                self.visit_expr(frame, value);
+                self.visit_expr(cell, frame, value);
             }
         }
     }
 
-    fn visit_expr(&mut self, frame: FrameId, expr: &Expr<'a, VarIdTyMetadata>) -> ValueId {
+    fn visit_expr(
+        &mut self,
+        cell_id: CellId,
+        frame: FrameId,
+        expr: &Expr<'a, VarIdTyMetadata>,
+    ) -> ValueId {
         let partial_eval_state = match expr {
             Expr::FloatLiteral(f) => {
                 let vid = self.value_id();
@@ -703,8 +726,8 @@ impl<'a> ExecPass<'a> {
                 return self.frames[&frame].bindings[&var_id];
             }
             Expr::Emit(e) => {
-                let vid = self.visit_expr(frame, &e.value);
-                self.emit.push(vid);
+                let vid = self.visit_expr(cell_id, frame, &e.value);
+                self.emit.push((cell_id, vid));
                 return vid;
             }
             Expr::Call(c) => {
@@ -716,13 +739,13 @@ impl<'a> ExecPass<'a> {
                                 .args
                                 .posargs
                                 .iter()
-                                .map(|arg| self.visit_expr(frame, arg))
+                                .map(|arg| self.visit_expr(cell_id, frame, arg))
                                 .collect(),
                             kwargs: c
                                 .args
                                 .kwargs
                                 .iter()
-                                .map(|arg| self.visit_expr(frame, &arg.value))
+                                .map(|arg| self.visit_expr(cell_id, frame, &arg.value))
                                 .collect(),
                         },
                     }))
@@ -731,7 +754,7 @@ impl<'a> ExecPass<'a> {
                         .args
                         .posargs
                         .iter()
-                        .map(|arg| self.visit_expr(frame, arg))
+                        .map(|arg| self.visit_expr(cell_id, frame, arg))
                         .collect_vec();
                     let val = &self.values[&self.lookup(frame, c.metadata.0.unwrap()).unwrap()]
                         .as_ref()
@@ -748,19 +771,19 @@ impl<'a> ExecPass<'a> {
                     let scope = val.scope.clone();
                     let fid = self.frame_id();
                     self.frames.insert(fid, call_frame);
-                    return self.visit_expr(fid, &Expr::Scope(Box::new(scope)));
+                    return self.visit_expr(cell_id, fid, &Expr::Scope(Box::new(scope)));
                 }
             }
             Expr::If(if_expr) => {
-                let cond = self.visit_expr(frame, &if_expr.cond);
+                let cond = self.visit_expr(cell_id, frame, &if_expr.cond);
                 PartialEvalState::If(Box::new(PartialIfExpr {
                     expr: (**if_expr).clone(),
                     state: IfExprState::Cond(cond),
                 }))
             }
             Expr::Comparison(comparison_expr) => {
-                let left = self.visit_expr(frame, &comparison_expr.left);
-                let right = self.visit_expr(frame, &comparison_expr.right);
+                let left = self.visit_expr(cell_id, frame, &comparison_expr.left);
+                let right = self.visit_expr(cell_id, frame, &comparison_expr.right);
                 PartialEvalState::Comparison(Box::new(PartialComparisonExpr {
                     expr: (**comparison_expr).clone(),
                     state: ComparisonExprState { left, right },
@@ -768,12 +791,12 @@ impl<'a> ExecPass<'a> {
             }
             Expr::Scope(s) => {
                 for stmt in &s.stmts {
-                    self.eval_stmt(frame, stmt);
+                    self.eval_stmt(cell_id, frame, stmt);
                 }
                 return s
                     .tail
                     .as_ref()
-                    .map(|tail| self.visit_expr(frame, tail))
+                    .map(|tail| self.visit_expr(cell_id, frame, tail))
                     .unwrap_or(self.nil_value);
             }
             Expr::EnumValue(e) => {
@@ -785,19 +808,19 @@ impl<'a> ExecPass<'a> {
                 return vid;
             }
             Expr::FieldAccess(f) => {
-                let base = self.visit_expr(frame, &f.base);
+                let base = self.visit_expr(cell_id, frame, &f.base);
                 PartialEvalState::FieldAccess(Box::new(PartialFieldAccessExpr {
                     expr: (**f).clone(),
                     state: FieldAccessExprState { base },
                 }))
             }
             Expr::BinOp(b) => {
-                let lhs = self.visit_expr(frame, &b.left);
-                let rhs = self.visit_expr(frame, &b.right);
+                let lhs = self.visit_expr(cell_id, frame, &b.left);
+                let rhs = self.visit_expr(cell_id, frame, &b.right);
                 PartialEvalState::BinOp(PartialBinOp { lhs, rhs, op: b.op })
             }
             Expr::Cast(cast) => {
-                let value = self.visit_expr(frame, &cast.value);
+                let value = self.visit_expr(cell_id, frame, &cast.value);
                 PartialEvalState::Cast(PartialCast {
                     value,
                     ty: cast.metadata.clone(),
@@ -806,12 +829,13 @@ impl<'a> ExecPass<'a> {
             x => todo!("{x:?}"),
         };
         let vid = self.value_id();
-        self.deferred.insert(vid);
+        self.deferred.insert((cell_id, vid));
         self.values.insert(
             vid,
             DeferValue::Deferred(PartialEval {
                 state: partial_eval_state,
                 frame,
+                cell: cell_id,
             }),
         );
         vid
@@ -829,6 +853,7 @@ impl<'a> ExecPass<'a> {
             return false;
         }
         let vref = vref.unwrap_deferred();
+        let state = self.cell_states.get_mut(&vref.cell).unwrap();
         let progress = match &mut vref.state {
             PartialEvalState::Call(c) => match c.expr.func.name {
                 "crect" | "rect" => {
@@ -846,10 +871,10 @@ impl<'a> ExecPass<'a> {
                     if let Some(layer) = layer {
                         let rect = Rect {
                             layer,
-                            x0: self.solver.new_var(),
-                            y0: self.solver.new_var(),
-                            x1: self.solver.new_var(),
-                            y1: self.solver.new_var(),
+                            x0: state.solver.new_var(),
+                            y0: state.solver.new_var(),
+                            x1: state.solver.new_var(),
+                            y1: state.solver.new_var(),
                             source: Some(SourceInfo {
                                 span: c.expr.span,
                                 id: self.alloc_id(),
@@ -911,9 +936,10 @@ impl<'a> ExecPass<'a> {
                                         rhs: *rhs,
                                     }),
                                     frame: vref.frame,
+                                    cell: vref.cell,
                                 }),
                             );
-                            self.deferred.insert(defer);
+                            self.deferred.insert((vref.cell, defer));
                         }
                         true
                     } else {
@@ -923,7 +949,7 @@ impl<'a> ExecPass<'a> {
                 "float" => {
                     self.values.insert(
                         vid,
-                        Defer::Ready(Value::Linear(LinearExpr::from(self.solver.new_var()))),
+                        Defer::Ready(Value::Linear(LinearExpr::from(state.solver.new_var()))),
                     );
                     true
                 }
@@ -934,7 +960,7 @@ impl<'a> ExecPass<'a> {
                     ) {
                         let expr = vl.as_ref().unwrap_linear().clone()
                             - vr.as_ref().unwrap_linear().clone();
-                        self.solver.constrain_eq0(expr);
+                        state.solver.constrain_eq0(expr);
                         self.values.insert(vid, Defer::Ready(Value::None));
                         true
                     } else {
@@ -957,14 +983,16 @@ impl<'a> ExecPass<'a> {
                                 BinOp::Add => Some(vl.clone() + vr.clone()),
                                 BinOp::Sub => Some(vl.clone() - vr.clone()),
                                 BinOp::Mul => {
-                                    match (self.solver.eval_expr(vl), self.solver.eval_expr(vr)) {
+                                    match (state.solver.eval_expr(vl), state.solver.eval_expr(vr)) {
                                         (Some(vl), Some(vr)) => Some((vl * vr).into()),
                                         (Some(vl), None) => Some(vr.clone() * vl),
                                         (None, Some(vr)) => Some(vl.clone() * vr),
                                         (None, None) => None,
                                     }
                                 }
-                                BinOp::Div => self.solver.eval_expr(vr).map(|rhs| vl.clone() / rhs),
+                                BinOp::Div => {
+                                    state.solver.eval_expr(vr).map(|rhs| vl.clone() / rhs)
+                                }
                             };
                             if let Some(res) = res {
                                 self.values
@@ -994,10 +1022,10 @@ impl<'a> ExecPass<'a> {
                 IfExprState::Cond(cond) => {
                     if let Defer::Ready(val) = &self.values[&cond] {
                         if *val.as_ref().unwrap_bool() {
-                            let then = self.visit_expr(vref.frame, &if_.expr.then);
+                            let then = self.visit_expr(vref.cell, vref.frame, &if_.expr.then);
                             if_.state = IfExprState::Then(then);
                         } else {
-                            let else_ = self.visit_expr(vref.frame, &if_.expr.else_);
+                            let else_ = self.visit_expr(vref.cell, vref.frame, &if_.expr.else_);
                             if_.state = IfExprState::Else(else_);
                         }
                         true
@@ -1030,7 +1058,7 @@ impl<'a> ExecPass<'a> {
                     match (vl, vr) {
                         (Value::Linear(vl), Value::Linear(vr)) => {
                             if let (Some(vl), Some(vr)) =
-                                (self.solver.eval_expr(vl), self.solver.eval_expr(vr))
+                                (state.solver.eval_expr(vl), state.solver.eval_expr(vr))
                             {
                                 let res = match comparison_expr.expr.op {
                                     crate::ast::ComparisonOp::Eq => {
@@ -1094,7 +1122,7 @@ impl<'a> ExecPass<'a> {
                     let lhs = vl.as_ref().unwrap_linear();
                     let rhs = vr.as_ref().unwrap_linear();
                     let expr = lhs.clone() - rhs.clone();
-                    self.solver.constrain_eq0(expr);
+                    state.solver.constrain_eq0(expr);
                     self.values.insert(vid, DeferValue::Ready(Value::None));
                     true
                 } else {
@@ -1108,7 +1136,7 @@ impl<'a> ExecPass<'a> {
                             Some(Value::Linear(LinearExpr::from(*x as f64)))
                         }
                         (x @ Value::Int(_), Ty::Int) => Some(x.clone()),
-                        (Value::Linear(expr), Ty::Int) => self
+                        (Value::Linear(expr), Ty::Int) => state
                             .solver
                             .eval_expr(expr)
                             .map(|val| Value::Int(val as i64)),
@@ -1127,9 +1155,10 @@ impl<'a> ExecPass<'a> {
             }
         };
 
+        let cell_id = vref.cell;
         self.values.entry(vid).or_insert(v);
         if self.values[&vid].is_ready() {
-            self.deferred.swap_remove(&vid);
+            self.deferred.swap_remove(&(cell_id, vid));
         }
         progress
     }
@@ -1172,6 +1201,7 @@ type DeferValue<'a, T> = Defer<Value<'a>, PartialEval<'a, T>>;
 struct PartialEval<'a, T: AstMetadata> {
     state: PartialEvalState<'a, T>,
     frame: FrameId,
+    cell: CellId,
 }
 
 #[derive(Debug, Clone)]
