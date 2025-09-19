@@ -1,17 +1,17 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::{DefaultHasher, Hash, Hasher},
     net::SocketAddr,
+    path::PathBuf,
 };
 
 use canvas::{LayoutCanvas, ShapeFill};
-use compiler::compile::{CompileOutput, CompiledCell, Rect, SolvedValue};
-use futures::channel::mpsc::{self, Receiver};
+use compiler::compile::CompileOutput;
 use gpui::*;
 use itertools::Itertools;
 use toolbars::{SideBar, TitleBar, ToolBar};
 
-use crate::{project::Project, rpc::SyncGuiToLspClient, theme::THEME};
+use crate::{rpc::SyncGuiToLspClient, theme::THEME};
 
 pub mod canvas;
 pub mod toolbars;
@@ -27,7 +27,8 @@ pub struct LayerState {
 }
 
 pub struct EditorState {
-    pub solved_cell: CompileOutput,
+    pub file: Option<PathBuf>,
+    pub solved_cell: Option<CompileOutput>,
     pub rects: Vec<canvas::Rect>,
     pub selected_rect: Option<usize>,
     pub layers: Entity<Vec<LayerState>>,
@@ -37,7 +38,6 @@ pub struct EditorState {
 
 pub struct Editor {
     pub state: Entity<EditorState>,
-    pub project: Option<Entity<Project>>,
     pub sidebar: Entity<SideBar>,
     pub canvas: Entity<LayoutCanvas>,
 }
@@ -99,7 +99,8 @@ fn get_layers(solved_cell: &CompileOutput) -> Vec<LayerState> {
 }
 
 impl EditorState {
-    pub fn update(&mut self, cx: &mut impl AppContext, solved_cell: CompileOutput) {
+    pub fn update(&mut self, cx: &mut impl AppContext, file: PathBuf, solved_cell: CompileOutput) {
+        self.file = Some(file);
         let layers = get_layers(&solved_cell);
         let rects = get_rects(&solved_cell, &layers);
         self.rects = rects;
@@ -107,55 +108,20 @@ impl EditorState {
             *old_layers = layers;
             cx.notify();
         });
+        self.solved_cell = Some(solved_cell);
     }
 }
 
 impl Editor {
     pub fn new(cx: &mut Context<Self>, lsp_addr: SocketAddr) -> Self {
         let lsp_client = SyncGuiToLspClient::new(cx.to_async(), lsp_addr);
-        let solved_cell = CompileOutput {
-            cells: HashMap::from([(
-                0,
-                CompiledCell {
-                    values: vec![
-                        SolvedValue::Rect(Rect {
-                            layer: Some("Met1".to_string()),
-                            x0: 0.,
-                            y0: 0.,
-                            x1: 100.,
-                            y1: 100.,
-                            source: None,
-                        }),
-                        SolvedValue::Rect(Rect {
-                            layer: Some("Via1".to_string()),
-                            x0: 10.,
-                            y0: 10.,
-                            x1: 90.,
-                            y1: 90.,
-                            source: None,
-                        }),
-                        SolvedValue::Rect(Rect {
-                            layer: Some("Met2".to_string()),
-                            x0: 5.,
-                            y0: 5.,
-                            x1: 95.,
-                            y1: 95.,
-                            source: None,
-                        }),
-                    ],
-                    fields: Default::default(),
-                },
-            )]),
-            top: 0,
-        };
-        let layers = get_layers(&solved_cell);
-        let rects = get_rects(&solved_cell, &layers);
-        let layers = cx.new(|_cx| layers);
+        let layers = cx.new(|_cx| Vec::new());
         let state = cx.new(|cx| {
             let subscriptions = vec![cx.observe(&layers, |_, _, cx| cx.notify())];
             EditorState {
-                solved_cell: solved_cell.clone(),
-                rects,
+                file: None,
+                solved_cell: None,
+                rects: Vec::new(),
                 selected_rect: None,
                 layers,
                 subscriptions,
@@ -168,7 +134,6 @@ impl Editor {
 
         Self {
             state,
-            project: None,
             sidebar,
             canvas,
         }

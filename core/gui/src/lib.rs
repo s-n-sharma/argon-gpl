@@ -1,19 +1,13 @@
-use std::collections::HashMap;
-use std::net::TcpStream;
-use std::path::PathBuf;
 use std::{borrow::Cow, net::SocketAddr};
 
 use clap::Parser;
 use editor::Editor;
 use gpui::*;
-use itertools::Itertools;
-use lsp_server::rpc::GuiToLspClient;
 
 use crate::assets::{ZED_PLEX_MONO, ZED_PLEX_SANS};
 
 pub mod assets;
 pub mod editor;
-pub mod project;
 pub mod rpc;
 pub mod theme;
 

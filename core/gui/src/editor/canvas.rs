@@ -2,11 +2,11 @@ use gpui::{
     div, pattern_slash, rgb, rgba, solid_background, BorderStyle, Bounds, Context, Corners,
     DefiniteLength, DragMoveEvent, Edges, Element, Entity, InteractiveElement, IntoElement, Length,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels,
-    Point, Render, Rgba, ScrollWheelEvent, Size, Style, Styled, Subscription, Window,
+    Point, Render, ScrollWheelEvent, Size, Style, Styled, Subscription, Window,
 };
 use itertools::Itertools;
 
-use crate::editor::{EditorState, LayerState};
+use crate::editor::EditorState;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum ShapeFill {
@@ -248,6 +248,7 @@ impl LayoutCanvas {
             .read(cx)
             .rects
             .iter()
+            .cloned()
             .map(|rect| {
                 let layer = self.state.read(cx).layers.read(cx)[rect.layer].clone();
                 (rect, layer)
@@ -270,13 +271,12 @@ impl LayoutCanvas {
                 self.state.update(cx, |state, cx| {
                     state.selected_rect = Some(i);
                     // TODO: Send message
-                    // if let Some(client) = &mut state.lsp_client {
-                    //     let msg = GuiToLspMessage::SelectedRect(SelectedRectMessage {
-                    //         rect: i as u64,
-                    //         span: r.span,
-                    //     });
-                    //     client.send(msg);
-                    // }
+                    state
+                        .lsp_client
+                        .select_rect(match (state.file.as_ref(), r.span) {
+                            (Some(f), Some(s)) => Some((f.clone(), s)),
+                            _ => None,
+                        });
                     cx.notify();
                 });
                 return;

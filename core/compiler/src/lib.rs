@@ -45,7 +45,7 @@ mod tests {
 
     use parse::parse;
 
-    use crate::compile::{CompileInput, VarIdTyPass, compile};
+    use crate::compile::{compile, CompileInput, VarIdTyPass};
 
     use super::*;
 
@@ -101,7 +101,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "scopes",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -114,7 +114,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "immediate",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -127,7 +127,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "if_test",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -140,7 +140,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "if_test",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -153,7 +153,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "via",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -166,7 +166,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "vias",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -179,7 +179,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "test",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cell:?}");
@@ -192,7 +192,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "top",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cells:#?}");
@@ -205,7 +205,7 @@ cell simple(y_enclosure: int) {
             &ast,
             CompileInput {
                 cell: "top",
-                params: HashMap::new(),
+                params: Vec::new(),
             },
         );
         println!("{cells:#?}");
@@ -230,7 +230,7 @@ cell simple(y_enclosure: int) {
     //     let cell = compile(CompileInput {
     //         cell: "vias",
     //         ast: &ast,
-    //         params: HashMap::new(),
+    //         params: Vec::new(),
     //     })
     //     .expect("failed to compile Argon cell");
     //     println!("cell: {cell:?}");

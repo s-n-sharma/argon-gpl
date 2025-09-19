@@ -1,8 +1,6 @@
 use gpui::prelude::*;
 use gpui::*;
 
-use itertools::Itertools;
-
 use crate::theme::THEME;
 
 use super::{EditorState, LayerState};
@@ -44,6 +42,7 @@ impl Render for ToolBar {
 
 pub struct SideBar {
     layers: Entity<Vec<LayerState>>,
+    #[allow(dead_code)]
     subscriptions: Vec<Subscription>,
 }
 

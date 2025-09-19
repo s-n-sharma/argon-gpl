@@ -1,18 +1,21 @@
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
+};
 
 use async_compat::CompatExt;
-use compiler::compile::{CompileOutput, CompiledCell};
+use cfgrammar::Span;
+use compiler::compile::CompileOutput;
 use futures::{
-    channel::mpsc::{self, Receiver, Sender},
-    future,
+    channel::mpsc::{self, Sender},
     prelude::*,
 };
-use gpui::{AsyncApp, BackgroundExecutor, Entity, ForegroundExecutor, Task};
+use gpui::{AsyncApp, Context, Entity};
 use lsp_server::rpc::{GuiToLspClient, LspToGui};
 use portpicker::pick_unused_port;
 use tarpc::{
     context,
-    server::{self, incoming::Incoming, Channel},
+    server::{incoming::Incoming, Channel},
     tokio_serde::formats::Json,
 };
 
@@ -68,7 +71,7 @@ impl SyncGuiToLspClient {
                         // the generated World trait.
                         .map(|channel| {
                             let server = GuiServer {
-                                opened_cells: tx.clone(),
+                                to_exec: tx.clone(),
                             };
                             channel
                                 .execute(server.serve())
@@ -94,26 +97,44 @@ impl SyncGuiToLspClient {
         );
         self.app
             .spawn(async move |app| loop {
-                if let Some(cell) = rx.next().await {
+                if let Some(exec) = rx.next().await {
                     state
                         .update(app, |state, cx| {
-                            state.update(cx, cell);
-                            cx.notify();
+                            exec(state, cx);
                         })
                         .unwrap();
                 }
             })
             .detach();
     }
+
+    pub fn select_rect(&self, span: Option<(PathBuf, Span)>) {
+        let client_clone = self.client.clone();
+        self.app.background_executor().block(
+            async move {
+                client_clone
+                    .select_rect(context::current(), span)
+                    .await
+                    .unwrap()
+            }
+            .compat(),
+        );
+    }
 }
 
 #[derive(Clone)]
 pub struct GuiServer {
-    opened_cells: Sender<CompileOutput>,
+    to_exec: Sender<Box<dyn FnOnce(&mut EditorState, &mut Context<EditorState>) + Send>>,
 }
 
 impl LspToGui for GuiServer {
-    async fn open_cell(mut self, _: context::Context, cell: CompileOutput) {
-        self.opened_cells.send(cell).await.unwrap();
+    async fn open_cell(mut self, _: context::Context, file: PathBuf, cell: CompileOutput) {
+        self.to_exec
+            .send(Box::new(|state, cx| {
+                state.update(cx, file, cell);
+                cx.notify();
+            }))
+            .await
+            .unwrap();
     }
 }

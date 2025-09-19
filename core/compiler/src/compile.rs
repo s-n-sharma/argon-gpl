@@ -5,9 +5,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use enumify::enumify;
-use geometry::point::Point;
-use geometry::prelude::Transform;
-use geometry::transform::{Rotation, TransformationBuilder, TransformationMatrix};
+use geometry::transform::{Rotation, TransformationMatrix};
 use indexmap::IndexSet;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -592,7 +590,6 @@ pub struct Rect<T> {
 type FrameId = u64;
 type ValueId = u64;
 pub type CellId = u64;
-type CellValueId = (CellId, ValueId);
 
 #[derive(Clone, Default)]
 struct Frame {
@@ -612,7 +609,6 @@ struct ExecPass<'a> {
     ast: &'a Ast<'a, VarIdTyMetadata>,
     cell_states: HashMap<CellId, CellState>,
     values: HashMap<ValueId, DeferValue<'a, VarIdTyMetadata>>,
-    // emit: Vec<CellValueId>,
     frames: HashMap<FrameId, Frame>,
     nil_value: ValueId,
     global_frame: FrameId,
@@ -664,20 +660,19 @@ impl<'a> ExecPass<'a> {
     pub(crate) fn execute_cell(&mut self, cell: &'a str, params: Vec<f64>) -> CellId {
         let cell_id = self.alloc_id();
         self.partial_cells.push_back(cell_id);
-        assert!(
-            self.cell_states
-                .insert(
-                    cell_id,
-                    CellState {
-                        solve_iters: 0,
-                        solver: Solver::new(),
-                        fields: HashMap::new(),
-                        emit: Vec::new(),
-                        deferred: Default::default(),
-                    }
-                )
-                .is_none()
-        );
+        assert!(self
+            .cell_states
+            .insert(
+                cell_id,
+                CellState {
+                    solve_iters: 0,
+                    solver: Solver::new(),
+                    fields: HashMap::new(),
+                    emit: Vec::new(),
+                    deferred: Default::default(),
+                }
+            )
+            .is_none());
         self.visit_cell_body(cell_id, cell, params);
         let mut require_progress = false;
         let mut progress = false;
@@ -795,42 +790,38 @@ impl<'a> ExecPass<'a> {
             match decl {
                 Decl::Fn(f) => {
                     let vid = self.value_id();
-                    assert!(
-                        self.values
-                            .insert(vid, DeferValue::Ready(Value::Fn(f.clone())))
-                            .is_none()
-                    );
-                    assert!(
-                        self.frames
-                            .get_mut(&self.global_frame)
-                            .unwrap()
-                            .bindings
-                            .insert(f.metadata, vid)
-                            .is_none()
-                    );
+                    assert!(self
+                        .values
+                        .insert(vid, DeferValue::Ready(Value::Fn(f.clone())))
+                        .is_none());
+                    assert!(self
+                        .frames
+                        .get_mut(&self.global_frame)
+                        .unwrap()
+                        .bindings
+                        .insert(f.metadata, vid)
+                        .is_none());
                 }
                 Decl::Cell(c) => {
                     let vid = self.value_id();
-                    assert!(
-                        self.values
-                            .insert(vid, DeferValue::Ready(Value::CellFn(c.clone())))
-                            .is_none()
-                    );
-                    assert!(
-                        self.frames
-                            .get_mut(&self.global_frame)
-                            .unwrap()
-                            .bindings
-                            .insert(c.metadata, vid)
-                            .is_none()
-                    );
+                    assert!(self
+                        .values
+                        .insert(vid, DeferValue::Ready(Value::CellFn(c.clone())))
+                        .is_none());
+                    assert!(self
+                        .frames
+                        .get_mut(&self.global_frame)
+                        .unwrap()
+                        .bindings
+                        .insert(c.metadata, vid)
+                        .is_none());
                 }
                 _ => (),
             }
         }
     }
 
-    fn visit_cell_body(&mut self, cell_id: CellId, cell: &'a str, params: Vec<f64>) {
+    fn visit_cell_body(&mut self, cell_id: CellId, cell: &'a str, _params: Vec<f64>) {
         // TODO: use params
         let cell = self
             .ast
@@ -924,7 +915,6 @@ impl<'a> ExecPass<'a> {
                     PartialEvalState::Call(Box::new(PartialCallExpr {
                         expr: c.clone(),
                         state: CallExprState {
-                            func: None,
                             posargs: c
                                 .args
                                 .posargs
@@ -971,21 +961,18 @@ impl<'a> ExecPass<'a> {
                             self.frames.insert(fid, call_frame);
                             return self.visit_expr(cell_id, fid, &Expr::Scope(Box::new(scope)));
                         }
-                        ValueRef::CellFn(val) => {
-                            PartialEvalState::Call(Box::new(PartialCallExpr {
-                                expr: c.clone(),
-                                state: CallExprState {
-                                    func: Some(val.metadata),
-                                    posargs: arg_vals,
-                                    kwargs: c
-                                        .args
-                                        .kwargs
-                                        .iter()
-                                        .map(|arg| self.visit_expr(cell_id, frame, &arg.value))
-                                        .collect(),
-                                },
-                            }))
-                        }
+                        ValueRef::CellFn(_) => PartialEvalState::Call(Box::new(PartialCallExpr {
+                            expr: c.clone(),
+                            state: CallExprState {
+                                posargs: arg_vals,
+                                kwargs: c
+                                    .args
+                                    .kwargs
+                                    .iter()
+                                    .map(|arg| self.visit_expr(cell_id, frame, &arg.value))
+                                    .collect(),
+                            },
+                        })),
                         _ => todo!("cannot call value: not a function or cell generator"),
                     }
                 }
@@ -1682,9 +1669,6 @@ struct PartialCallExpr<'a, T: AstMetadata> {
 
 #[derive(Debug, Clone)]
 pub struct CallExprState {
-    /// Should be Some for cell functions or None for built-ins.
-    /// Not applicable to user defined functions, which are never deferred.
-    func: Option<ValueId>,
     posargs: Vec<ValueId>,
     kwargs: Vec<ValueId>,
 }
@@ -1721,10 +1705,6 @@ fn ifmatvec(mat: TransformationMatrix, pt: (f64, f64)) -> (f64, f64) {
 
 impl Rect<f64> {
     fn transform(&self, reflect_vert: bool, angle: Rotation) -> Self {
-        let trans = TransformationBuilder::default()
-            .reflect_vert(reflect_vert)
-            .angle(angle)
-            .build();
         let mut mat = TransformationMatrix::identity();
         if reflect_vert {
             mat = mat.reflect_vert()

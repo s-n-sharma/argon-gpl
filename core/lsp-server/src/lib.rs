@@ -1,21 +1,20 @@
 pub mod rpc;
 
 use std::{
-    fs::File,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     process::Stdio,
     sync::Arc,
 };
 
-use compiler::compile::{CompileOutput, CompiledCell};
+use compiler::compile::CompileOutput;
 use futures::prelude::*;
-use portpicker::pick_unused_port;
+use portpicker::{is_free, pick_unused_port};
 use rpc::{GuiToLsp, LspServer, LspToGuiClient};
 use serde::{Deserialize, Serialize};
 use tarpc::{
     context,
-    server::{self, Channel, incoming::Incoming},
+    server::{incoming::Incoming, Channel},
     tokio_serde::formats::Json,
 };
 use tokio::{process::Command, sync::Mutex};
@@ -34,48 +33,6 @@ pub struct SharedState {
 struct Backend {
     state: SharedState,
 }
-
-// async fn handle_gui_r(client: Client, uri: Url, gui_r: OwnedReadHalf) {
-//     let mut sock = LspFromGui::new(gui_r);
-//     let src = tokio::fs::read_to_string(uri.to_file_path().unwrap())
-//         .await
-//         .unwrap();
-//     let line_lengths = std::iter::once(0)
-//         .chain(src.lines().map(|s| s.len() + 1).scan(0, |state, x| {
-//             *state += x;
-//             Some(*state)
-//         }))
-//         .collect::<Vec<_>>();
-//     let char2pos = |c: usize| {
-//         let line_idx = match line_lengths.binary_search(&c) {
-//             Ok(index) | Err(index) => index,
-//         }
-//         .saturating_sub(1);
-//         Position::new(line_idx as u32, (c - line_lengths[line_idx]) as u32)
-//     };
-//     loop {
-//         let msg = sock.read().await;
-//         match msg {
-//             GuiToLspMessage::SelectedRect(msg) => {
-//                 if let Some(span) = msg.span {
-//                     let diagnostics = vec![Diagnostic {
-//                         range: Range {
-//                             start: char2pos(span.start()),
-//                             end: char2pos(span.end()),
-//                         },
-//                         severity: Some(DiagnosticSeverity::INFORMATION),
-//                         message: "selected rect".to_string(),
-//                         ..Default::default()
-//                     }];
-//                     client
-//                         .publish_diagnostics(uri.clone(), diagnostics, None)
-//                         .await;
-//                 }
-//             }
-//             _ => unimplemented!(),
-//         }
-//     }
-// }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -101,7 +58,7 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {}
+    async fn did_open(&self, _params: DidOpenTextDocumentParams) {}
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
@@ -154,7 +111,7 @@ impl Backend {
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../target/debug/compiler"
             ))
-            .arg(params.file)
+            .arg(&params.file)
             .arg(params.cell)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -167,7 +124,10 @@ impl Backend {
             let o_str = String::from_utf8(o.stdout).unwrap();
             let o: CompileOutput = serde_json::from_str(&o_str).unwrap();
             if let Some(client) = state.gui_client.lock().await.as_mut() {
-                client.open_cell(context::current(), o).await.unwrap();
+                client
+                    .open_cell(context::current(), params.file, o)
+                    .await
+                    .unwrap();
             } else {
                 state
                     .editor_client
@@ -185,12 +145,16 @@ async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
 
 pub async fn main() {
     // Start server for communication with GUI.
-    let port = loop {
-        if let Some(port) = pick_unused_port() {
-            break port;
+    let port = 12345; // for debugging
+    let port = if is_free(port) {
+        port
+    } else {
+        loop {
+            if let Some(port) = pick_unused_port() {
+                break port;
+            }
         }
     };
-    let port = 12345; // for debugging
     let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), port).into();
 
     // Construct actual LSP server.
