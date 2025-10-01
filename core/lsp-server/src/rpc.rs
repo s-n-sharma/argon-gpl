@@ -4,7 +4,7 @@ use arcstr::ArcStr;
 use cfgrammar::Span;
 use compiler::{
     ast::annotated::AnnotatedAst,
-    compile::{CompileOutput, Rect},
+    compile::{BasicRect, CompileOutput, Rect},
     parse,
 };
 
@@ -19,7 +19,7 @@ use crate::{State, document::DocumentChange};
 pub trait GuiToLsp {
     async fn register(addr: SocketAddr);
     async fn select_rect(span: Option<(PathBuf, Span)>);
-    async fn draw_rect(file: PathBuf, scope_span: Span, var_name: String, rect: Rect<f64>);
+    async fn draw_rect(file: PathBuf, scope_span: Span, var_name: String, rect: BasicRect<f64>);
 }
 
 #[tarpc::service]
@@ -77,7 +77,7 @@ impl GuiToLsp for LspServer {
         file: PathBuf,
         scope_span: Span,
         var_name: String,
-        rect: Rect<f64>,
+        rect: BasicRect<f64>,
     ) {
         if let Some(doc) = self
             .state

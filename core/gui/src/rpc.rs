@@ -5,7 +5,7 @@ use std::{
 
 use async_compat::CompatExt;
 use cfgrammar::Span;
-use compiler::compile::{CompileOutput, Rect};
+use compiler::compile::{BasicRect, CompileOutput, Rect};
 use futures::{
     channel::mpsc::{self, Sender},
     prelude::*,
@@ -13,9 +13,10 @@ use futures::{
 use gpui::{AsyncApp, Context, Entity};
 use lsp_server::rpc::{GuiToLspClient, LspToGui};
 use portpicker::pick_unused_port;
+use serde::{Deserialize, Serialize};
 use tarpc::{
     context,
-    server::{Channel, incoming::Incoming},
+    server::{incoming::Incoming, Channel},
     tokio_serde::formats::Json,
 };
 
@@ -95,15 +96,13 @@ impl SyncGuiToLspClient {
             .compat(),
         );
         self.app
-            .spawn(async move |app| {
-                loop {
-                    if let Some(exec) = rx.next().await {
-                        state
-                            .update(app, |state, cx| {
-                                exec(state, cx);
-                            })
-                            .unwrap();
-                    }
+            .spawn(async move |app| loop {
+                if let Some(exec) = rx.next().await {
+                    state
+                        .update(app, |state, cx| {
+                            exec(state, cx);
+                        })
+                        .unwrap();
                 }
             })
             .detach();
@@ -124,7 +123,13 @@ impl SyncGuiToLspClient {
     }
 
     // TODO: Improve API.
-    pub fn draw_rect(&self, file: PathBuf, scope_span: Span, var_name: String, rect: Rect<f64>) {
+    pub fn draw_rect(
+        &self,
+        file: PathBuf,
+        scope_span: Span,
+        var_name: String,
+        rect: BasicRect<f64>,
+    ) {
         let client_clone = self.client.clone();
         self.app.background_executor().block(
             async move {
