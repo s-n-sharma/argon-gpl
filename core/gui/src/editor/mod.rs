@@ -177,6 +177,7 @@ impl EditorState {
                             }),
                     );
                 }
+                _ => (),
             }
         }
 
