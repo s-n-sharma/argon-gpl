@@ -1,5 +1,6 @@
 %%
 
+use "USE"
 enum "ENUM"
 struct "STRUCT"
 match "MATCH"
@@ -31,6 +32,7 @@ false "FALSE"
 \{ "{"
 \} "}"
 \. "."
+::\* "::*"
 :: "::"
 : ":"
 ; ";"

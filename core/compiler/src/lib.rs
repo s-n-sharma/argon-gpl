@@ -16,7 +16,7 @@ mod tests {
     use indexmap::IndexMap;
     use regex::Regex;
 
-    use crate::compile::{CellArg, CompileInput, compile};
+    use crate::compile::{compile, CellArg, CompileInput};
     const EPSILON: f64 = 1e-10;
 
     const ARGON_SCOPES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/scopes/lib.ar");
@@ -60,6 +60,7 @@ mod tests {
     );
     const ARGON_ENUMERATIONS: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/examples/enumerations/lib.ar");
+    const ARGON_USE_DECLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/use_decls/lib.ar");
     const ARGON_WORKSPACE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/examples/argon_workspace/lib.ar"
@@ -453,6 +454,29 @@ mod tests {
         let r = cell.objects.iter().next().unwrap().1.as_ref().unwrap_rect();
         assert_eq!(r.layer.as_deref(), Some("met2"));
         assert_relative_eq!(r.x0.0, 100., epsilon = EPSILON);
+        assert_relative_eq!(r.y0.0, 0., epsilon = EPSILON);
+        assert_relative_eq!(r.x1.0, 300., epsilon = EPSILON);
+        assert_relative_eq!(r.y1.0, 400., epsilon = EPSILON);
+    }
+
+    #[test]
+    fn argon_use_decls() {
+        let ast = parse_workspace_with_std(ARGON_USE_DECLS).unwrap_asts();
+        let cells = compile(
+            &ast,
+            CompileInput {
+                cell: &["top"],
+                args: Vec::new(),
+                lyp_file: &PathBuf::from(BASIC_LYP),
+            },
+        );
+        println!("{cells:?}");
+        let cells = cells.unwrap_valid();
+        let cell = &cells.cells[&cells.top];
+        assert_eq!(cell.objects.len(), 1);
+        let r = cell.objects.iter().next().unwrap().1.as_ref().unwrap_rect();
+        assert_eq!(r.layer.as_deref(), Some("met1"));
+        assert_relative_eq!(r.x0.0, 200., epsilon = EPSILON);
         assert_relative_eq!(r.y0.0, 0., epsilon = EPSILON);
         assert_relative_eq!(r.x1.0, 300., epsilon = EPSILON);
         assert_relative_eq!(r.y1.0, 400., epsilon = EPSILON);

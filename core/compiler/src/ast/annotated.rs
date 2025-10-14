@@ -38,6 +38,9 @@ impl<T: AstMetadata> AnnotatedAst<T> {
                 Decl::Enum(e) => {
                     decls.push(Decl::Enum(pass.transform_enum_decl(e)));
                 }
+                Decl::Use(u) => {
+                    decls.push(Decl::Use(pass.transform_use_decl(u)));
+                }
                 _ => todo!(),
             }
         }
@@ -118,6 +121,15 @@ impl<S, T: AstMetadata> AstTransformer for AstAnnotationPass<S, T> {
         _ty: &super::Ident<Self::OutputS, Self::OutputMetadata>,
         _value: &super::Expr<Self::OutputS, Self::OutputMetadata>,
     ) -> <Self::OutputMetadata as AstMetadata>::ConstantDecl {
+        input.metadata.clone()
+    }
+
+    fn dispatch_use_decl(
+        &mut self,
+        input: &super::UseDecl<Self::InputS, Self::InputMetadata>,
+        _path: &super::IdentPath<Self::OutputS, Self::OutputMetadata>,
+        _variation: &super::UseVariation<Ident<Self::OutputS, Self::OutputMetadata>>,
+    ) -> <Self::OutputMetadata as AstMetadata>::UseDecl {
         input.metadata.clone()
     }
 

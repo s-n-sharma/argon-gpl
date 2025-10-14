@@ -24,6 +24,13 @@ Decl -> Result<Decl<&'input str, ParseMetadata>, ()>
   | FnDecl { Ok(Decl::Fn($1?)) }
   | ConstantDecl { Ok(Decl::Constant($1?)) }
   | ModDecl { Ok(Decl::Mod($1?)) }
+  | UseDecl { Ok(Decl::Use($1?)) }
+  ;
+
+UseDecl -> Result<UseDecl<&'input str, ParseMetadata>, ()>
+  : 'USE' IdentPath ';' { Ok(UseDecl { path: $2?, variation: UseVariation::None, span: $span, metadata: () }) }
+  | 'USE' IdentPath 'AS' Ident ';' { Ok(UseDecl { path: $2?, variation: UseVariation::Rename($4?), span: $span, metadata: () }) }
+  | 'USE' IdentPath '::*' ';' { Ok(UseDecl { path: $2?, variation: UseVariation::Wildcard, span: $span, metadata: () }) }
   ;
 
 Ident -> Result<Ident<&'input str, ParseMetadata>, ()>

@@ -3,14 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use arcstr::ArcStr;
 use indexmap::IndexMap;
-use lrlex::{DefaultLexerTypes, lrlex_mod};
-use lrpar::{LexError, LexParseError, Lexeme, NonStreamingLexer, lrpar_mod};
+use lrlex::{lrlex_mod, DefaultLexerTypes};
+use lrpar::{lrpar_mod, LexError, LexParseError, Lexeme, NonStreamingLexer};
 
 use crate::{
-    ast::{Ast, AstMetadata, CallExpr, Decl, ModPath, Span, WorkspaceAst, annotated::AnnotatedAst},
+    ast::{annotated::AnnotatedAst, Ast, AstMetadata, CallExpr, Decl, ModPath, Span, WorkspaceAst},
     compile::{StaticError, StaticErrorKind},
     config::parse_config,
 };
@@ -49,6 +49,7 @@ impl AstMetadata for ParseMetadata {
     type Typ = ();
     type FnDecl = ();
     type CastExpr = ();
+    type UseDecl = ();
 }
 
 pub fn get_mod(root_lib: impl AsRef<Path>, path: &ModPath) -> Result<PathBuf, anyhow::Error> {

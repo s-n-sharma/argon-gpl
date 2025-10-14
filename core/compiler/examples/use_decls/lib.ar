@@ -1,0 +1,6 @@
+use std::max;
+
+cell top() {
+    let x0 = max(100., 200.);
+    let r = rect("met1", x0=x0, y0=0., x1=300., y1=400.)!;
+}

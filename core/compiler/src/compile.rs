@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::ast::annotated::AnnotatedAst;
 use crate::ast::{
     BinOp, ComparisonOp, ConstantDecl, EnumDecl, FieldAccessExpr, FnDecl, IdentPath, KwArgValue,
-    MatchExpr, ModPath, Scope, Span, UnaryOp, WorkspaceAst,
+    MatchExpr, ModPath, Scope, Span, UnaryOp, UseVariation, WorkspaceAst,
 };
 use crate::layer::LayerProperties;
 use crate::parse::WorkspaceParseAst;
@@ -131,6 +131,9 @@ impl<'a> ImportPass<'a> {
                 }
                 Decl::Mod(_) => {}
                 Decl::Enum(_) => {}
+                Decl::Use(u) => {
+                    self.transform_use_decl(u);
+                }
                 _ => todo!(),
             }
         }
@@ -191,6 +194,47 @@ impl<'a> AstTransformer for ImportPass<'a> {
         _ty: &Ident<Self::OutputS, Self::OutputMetadata>,
         _value: &Expr<Self::OutputS, Self::OutputMetadata>,
     ) -> <Self::OutputMetadata as AstMetadata>::ConstantDecl {
+    }
+
+    fn dispatch_use_decl(
+        &mut self,
+        input: &crate::ast::UseDecl<Self::InputS, Self::InputMetadata>,
+        _path: &IdentPath<Self::OutputS, Self::OutputMetadata>,
+        _variation: &crate::ast::UseVariation<Ident<Self::OutputS, Self::OutputMetadata>>,
+    ) -> <Self::OutputMetadata as AstMetadata>::UseDecl {
+        if input.path.path[0].name != "std" {
+            let path = if input.path.path[0].name == "crate" {
+                input
+                    .path
+                    .path
+                    .iter()
+                    .skip(1)
+                    .dropping_back(1)
+                    .map(|ident| ident.name.to_string())
+                    .collect_vec()
+            } else {
+                self.current_path
+                    .iter()
+                    .cloned()
+                    .chain(
+                        input
+                            .path
+                            .path
+                            .iter()
+                            .dropping_back(1)
+                            .map(|ident| ident.name.to_string()),
+                    )
+                    .collect_vec()
+            };
+            if let Some((path_ref, _)) = self.ast.get_key_value(&path) {
+                self.deps.insert(path_ref);
+            } else {
+                self.errors.push(StaticError {
+                    span: self.span(input.path.span),
+                    kind: StaticErrorKind::InvalidMod,
+                });
+            }
+        }
     }
 
     fn dispatch_let_binding(
@@ -531,6 +575,7 @@ impl AstMetadata for VarIdTyMetadata {
     type Scope = Ty;
     type Typ = ();
     type CastExpr = Ty;
+    type UseDecl = VarId;
 }
 
 impl<'a> VarIdTyPass<'a> {
@@ -588,6 +633,9 @@ impl<'a> VarIdTyPass<'a> {
                 }
                 Decl::Enum(e) => {
                     decls.push(Decl::Enum(self.transform_enum_decl(e)));
+                }
+                Decl::Use(u) => {
+                    decls.push(Decl::Use(self.transform_use_decl(u)));
                 }
                 _ => todo!(),
             }
@@ -958,6 +1006,58 @@ impl<'a> AstTransformer for VarIdTyPass<'a> {
         _scope: &Scope<Substr, Self::OutputMetadata>,
     ) -> <Self::OutputMetadata as AstMetadata>::FnDecl {
         (self.ast.path.clone(), self.lookup(&name.name).unwrap().0)
+    }
+
+    fn dispatch_use_decl(
+        &mut self,
+        input: &crate::ast::UseDecl<Self::InputS, Self::InputMetadata>,
+        path: &IdentPath<Self::OutputS, Self::OutputMetadata>,
+        variation: &crate::ast::UseVariation<Ident<Self::OutputS, Self::OutputMetadata>>,
+    ) -> <Self::OutputMetadata as AstMetadata>::UseDecl {
+        let name = match variation {
+            UseVariation::None => &path.path.last().unwrap().name,
+            UseVariation::Rename(ident) => &ident.name,
+            _ => unimplemented!(),
+        };
+        let path = match path.path[0].name.as_str() {
+            "std" => {
+                vec!["std".to_string()]
+            }
+            "crate" => path
+                .path
+                .iter()
+                .skip(1)
+                .dropping_back(1)
+                .map(|ident| ident.name.to_string())
+                .collect_vec(),
+            _ => self
+                .current_path
+                .iter()
+                .cloned()
+                .chain(
+                    path.path
+                        .iter()
+                        .dropping_back(1)
+                        .map(|ident| ident.name.to_string()),
+                )
+                .collect_vec(),
+        };
+        let name = &input.path.path.last().unwrap().name;
+        let lookup = self
+            .mod_bindings
+            .get(&path)
+            .as_ref()
+            .and_then(|mod_binding| mod_binding.var_bindings.get(name.as_str()).cloned());
+        let ty = if let Some((_, ty)) = lookup {
+            ty
+        } else {
+            self.errors.push(StaticError {
+                span: self.span(input.path.span),
+                kind: StaticErrorKind::UndeclaredVar,
+            });
+            Ty::Unknown
+        };
+        self.alloc(&name, ty)
     }
 
     fn transform_fn_decl(

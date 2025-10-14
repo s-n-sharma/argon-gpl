@@ -38,6 +38,7 @@ pub enum Decl<S, T: AstMetadata> {
     Cell(CellDecl<S, T>),
     Mod(ModDecl<S, T>),
     Fn(FnDecl<S, T>),
+    Use(UseDecl<S, T>),
 }
 
 #[derive_where(Debug, Clone, Serialize, Deserialize; S)]
@@ -204,6 +205,35 @@ pub struct IfExpr<S, T: AstMetadata> {
     pub metadata: T::IfExpr,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[enumify::enumify(generics_only)]
+pub enum UseVariation<T> {
+    None,
+    Wildcard,
+    Rename(T),
+}
+
+impl<T> UseVariation<T> {
+    pub fn map_rename<U, F>(self, f: F) -> UseVariation<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Self::None => UseVariation::None,
+            Self::Wildcard => UseVariation::Wildcard,
+            Self::Rename(ident) => UseVariation::Rename(f(ident)),
+        }
+    }
+}
+
+#[derive_where(Debug, Clone, Serialize, Deserialize; S)]
+pub struct UseDecl<S, T: AstMetadata> {
+    pub path: IdentPath<S, T>,
+    pub variation: UseVariation<Ident<S, T>>,
+    pub span: cfgrammar::Span,
+    pub metadata: T::UseDecl,
+}
+
 #[derive_where(Debug, Clone, Serialize, Deserialize; S)]
 pub struct MatchExpr<S, T: AstMetadata> {
     pub scrutinee: Expr<S, T>,
@@ -347,6 +377,7 @@ pub trait AstMetadata {
     type ConstantDecl: Debug + Clone + Serialize + DeserializeOwned;
     type LetBinding: Debug + Clone + Serialize + DeserializeOwned;
     type IfExpr: Debug + Clone + Serialize + DeserializeOwned;
+    type UseDecl: Debug + Clone + Serialize + DeserializeOwned;
     type MatchExpr: Debug + Clone + Serialize + DeserializeOwned;
     type BinOpExpr: Debug + Clone + Serialize + DeserializeOwned;
     type UnaryOpExpr: Debug + Clone + Serialize + DeserializeOwned;
@@ -404,6 +435,12 @@ pub trait AstTransformer {
         ty: &Ident<Self::OutputS, Self::OutputMetadata>,
         value: &Expr<Self::OutputS, Self::OutputMetadata>,
     ) -> <Self::OutputMetadata as AstMetadata>::ConstantDecl;
+    fn dispatch_use_decl(
+        &mut self,
+        input: &UseDecl<Self::InputS, Self::InputMetadata>,
+        path: &IdentPath<Self::OutputS, Self::OutputMetadata>,
+        variation: &UseVariation<Ident<Self::OutputS, Self::OutputMetadata>>,
+    ) -> <Self::OutputMetadata as AstMetadata>::UseDecl;
     fn dispatch_let_binding(
         &mut self,
         input: &LetBinding<Self::InputS, Self::InputMetadata>,
@@ -563,6 +600,7 @@ pub trait AstTransformer {
             metadata,
         }
     }
+
     fn transform_fn_decl(
         &mut self,
         input: &FnDecl<Self::InputS, Self::InputMetadata>,
@@ -588,6 +626,7 @@ pub trait AstTransformer {
             metadata,
         }
     }
+
     fn transform_mod_decl(
         &mut self,
         input: &ModDecl<Self::InputS, Self::InputMetadata>,
@@ -598,6 +637,7 @@ pub trait AstTransformer {
             span: input.span,
         }
     }
+
     fn transform_constant_decl(
         &mut self,
         input: &ConstantDecl<Self::InputS, Self::InputMetadata>,
@@ -613,6 +653,25 @@ pub trait AstTransformer {
             metadata,
         }
     }
+
+    fn transform_use_decl(
+        &mut self,
+        input: &UseDecl<Self::InputS, Self::InputMetadata>,
+    ) -> UseDecl<Self::OutputS, Self::OutputMetadata> {
+        let path = self.transform_ident_path(&input.path);
+        let variation = input
+            .variation
+            .as_ref()
+            .map_rename(|ident| self.transform_ident(&ident));
+        let metadata = self.dispatch_use_decl(input, &path, &variation);
+        UseDecl {
+            path,
+            variation,
+            metadata,
+            span: input.span,
+        }
+    }
+
     fn transform_statement(
         &mut self,
         input: &Statement<Self::InputS, Self::InputMetadata>,
@@ -625,6 +684,7 @@ pub trait AstTransformer {
             Statement::LetBinding(l) => Statement::LetBinding(self.transform_let_binding(l)),
         }
     }
+
     fn transform_let_binding(
         &mut self,
         input: &LetBinding<Self::InputS, Self::InputMetadata>,
@@ -639,6 +699,7 @@ pub trait AstTransformer {
             span: input.span,
         }
     }
+
     fn transform_if_expr(
         &mut self,
         input: &IfExpr<Self::InputS, Self::InputMetadata>,
@@ -660,6 +721,7 @@ pub trait AstTransformer {
             else_,
         }
     }
+
     fn transform_match_expr(
         &mut self,
         input: &MatchExpr<Self::InputS, Self::InputMetadata>,
@@ -682,6 +744,7 @@ pub trait AstTransformer {
             metadata,
         }
     }
+
     fn transform_bin_op_expr(
         &mut self,
         input: &BinOpExpr<Self::InputS, Self::InputMetadata>,
@@ -710,6 +773,7 @@ pub trait AstTransformer {
             operand,
         }
     }
+
     fn transform_comparison_expr(
         &mut self,
         input: &ComparisonExpr<Self::InputS, Self::InputMetadata>,
@@ -725,6 +789,7 @@ pub trait AstTransformer {
             right,
         }
     }
+
     fn transform_field_access_expr(
         &mut self,
         input: &FieldAccessExpr<Self::InputS, Self::InputMetadata>,

@@ -106,6 +106,14 @@ impl<'a> AstTransformer for ScopeAnnotationPass<'a> {
     ) -> <Self::OutputMetadata as AstMetadata>::ConstantDecl {
     }
 
+    fn dispatch_use_decl(
+        &mut self,
+        input: &compiler::ast::UseDecl<Self::InputS, Self::InputMetadata>,
+        path: &IdentPath<Self::OutputS, Self::OutputMetadata>,
+        variation: &compiler::ast::UseVariation<Ident<Self::OutputS, Self::OutputMetadata>>,
+    ) -> <Self::OutputMetadata as AstMetadata>::UseDecl {
+    }
+
     fn dispatch_if_expr(
         &mut self,
         input: &IfExpr<Substr, Self::InputMetadata>,
