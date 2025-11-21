@@ -7,9 +7,12 @@ use compiler::{
 
 use serde::{Deserialize, Serialize};
 use tarpc::tokio_serde::formats::Json;
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, MessageType, Position, Range, ShowDocumentParams, TextEdit,
-    Url, WorkspaceEdit,
+use tower_lsp_server::{
+    UriExt,
+    lsp_types::{
+        Diagnostic, DiagnosticSeverity, MessageType, Position, Range, ShowDocumentParams, TextEdit,
+        Uri, WorkspaceEdit,
+    },
 };
 
 use crate::{ForceSave, Redo, State, Undo, document::Document};
@@ -48,6 +51,7 @@ pub trait LangServer {
 pub trait Gui {
     async fn open_cell(cell: CompileOutput, update: bool);
     async fn set(key: String, value: String);
+    async fn activate();
 }
 
 impl LangServer for State {
@@ -68,7 +72,7 @@ impl LangServer for State {
         let state_mut = self.state_mut.lock().await;
         if let Some(ast) = state_mut.ast.values().find(|ast| ast.path == span.path) {
             let doc = Document::new(&ast.text, 0);
-            let url = Url::from_file_path(&span.path).unwrap();
+            let url = Uri::from_file_path(&span.path).unwrap();
             let diagnostics = vec![Diagnostic {
                 range: Range {
                     start: doc.offset_to_pos(span.span.start()),
@@ -92,15 +96,13 @@ impl LangServer for State {
         rect: BasicRect<f64>,
     ) -> Option<Span> {
         let state_mut = self.state_mut.lock().await;
-        let url = Url::from_file_path(&scope_span.path).unwrap();
 
         if state_mut.ast.values().any(|ast| {
-            ast.text
-                != state_mut
-                    .editor_files
-                    .get(&url)
-                    .map(|file| file.contents())
-                    .unwrap_or_default()
+            state_mut
+                .editor_files
+                .get(&Uri::from_file_path(&ast.path).unwrap())
+                .map(|file| file.contents() != ast.text)
+                .unwrap_or_default()
         }) {
             self.editor_client
                 .show_message(
@@ -110,6 +112,8 @@ impl LangServer for State {
                 .await;
             return None;
         }
+
+        let url = Uri::from_file_path(&scope_span.path).unwrap();
 
         if let Some(ast) = state_mut
             .ast
@@ -220,7 +224,25 @@ impl LangServer for State {
         params: DimensionParams,
     ) -> Option<Span> {
         let state_mut = self.state_mut.lock().await;
-        let url = Url::from_file_path(&scope_span.path).unwrap();
+
+        if state_mut.ast.values().any(|ast| {
+            state_mut
+                .editor_files
+                .get(&Uri::from_file_path(&ast.path).unwrap())
+                .map(|file| file.contents() != ast.text)
+                .unwrap_or_default()
+        }) {
+            self.editor_client
+                .show_message(
+                    MessageType::ERROR,
+                    "Editor buffer state is inconsistent with GUI state.",
+                )
+                .await;
+            return None;
+        }
+
+        let url = Uri::from_file_path(&scope_span.path).unwrap();
+
         if let Some(ast) = state_mut
             .ast
             .values()
@@ -290,18 +312,6 @@ impl LangServer for State {
                 )
             };
 
-            if let Some(file) = state_mut.editor_files.get(&url)
-                && file.contents() != doc.contents()
-            {
-                self.editor_client
-                    .show_message(
-                        MessageType::ERROR,
-                        "Editor buffer state is inconsistent with GUI state.",
-                    )
-                    .await;
-                return None;
-            }
-
             self.editor_client
                 .show_document(ShowDocumentParams {
                     uri: url.clone(),
@@ -338,7 +348,25 @@ impl LangServer for State {
         value: String,
     ) -> Option<Span> {
         let state_mut = self.state_mut.lock().await;
-        let url = Url::from_file_path(&span.path).unwrap();
+
+        if state_mut.ast.values().any(|ast| {
+            state_mut
+                .editor_files
+                .get(&Uri::from_file_path(&ast.path).unwrap())
+                .map(|file| file.contents() != ast.text)
+                .unwrap_or_default()
+        }) {
+            self.editor_client
+                .show_message(
+                    MessageType::ERROR,
+                    "Editor buffer state is inconsistent with GUI state.",
+                )
+                .await;
+            return None;
+        }
+
+        let url = Uri::from_file_path(&span.path).unwrap();
+
         if let Some(ast) = state_mut.ast.values().find(|ast| ast.path == span.path)
             && let Some(c) = ast.span2call.get(&span)
         {
@@ -350,17 +378,6 @@ impl LangServer for State {
                 range: Range::new(start, stop),
                 new_text: value,
             };
-            if let Some(file) = state_mut.editor_files.get(&url)
-                && file.contents() != doc.contents()
-            {
-                self.editor_client
-                    .show_message(
-                        MessageType::ERROR,
-                        "Editor buffer state is inconsistent with GUI state.",
-                    )
-                    .await;
-                return None;
-            }
 
             self.editor_client
                 .show_document(ShowDocumentParams {
@@ -406,7 +423,25 @@ impl LangServer for State {
         rhs: String,
     ) {
         let state_mut = self.state_mut.lock().await;
-        let url = Url::from_file_path(&scope_span.path).unwrap();
+
+        if state_mut.ast.values().any(|ast| {
+            state_mut
+                .editor_files
+                .get(&Uri::from_file_path(&ast.path).unwrap())
+                .map(|file| file.contents() != ast.text)
+                .unwrap_or_default()
+        }) {
+            self.editor_client
+                .show_message(
+                    MessageType::ERROR,
+                    "Editor buffer state is inconsistent with GUI state.",
+                )
+                .await;
+            return;
+        }
+
+        let url = Uri::from_file_path(&scope_span.path).unwrap();
+
         if let Some(ast) = state_mut
             .ast
             .values()
@@ -453,18 +488,6 @@ impl LangServer for State {
                     ),
                 }
             };
-
-            if let Some(file) = state_mut.editor_files.get(&url)
-                && file.contents() != doc.contents()
-            {
-                self.editor_client
-                    .show_message(
-                        MessageType::ERROR,
-                        "Editor buffer state is inconsistent with GUI state.",
-                    )
-                    .await;
-                return;
-            }
 
             self.editor_client
                 .show_document(ShowDocumentParams {

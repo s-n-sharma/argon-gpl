@@ -33,12 +33,12 @@ use tarpc::{
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::Command,
+    process::{Child, Command},
     sync::Mutex,
 };
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::{request::Request, *};
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::lsp_types::{request::Request, *};
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::{UriExt, jsonrpc::Result};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -50,20 +50,21 @@ use crate::{
 
 // TODO: finer-grained synchronization?
 // TODO: Verify synchronization between GUI and editor files when appropriate.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct StateMut {
+    gui: Option<Child>,
     root_dir: Option<PathBuf>,
     config: Option<Config>,
     ast: WorkspaceParseAst,
-    prev_diagnostics: IndexMap<Url, Vec<Diagnostic>>,
+    prev_diagnostics: IndexMap<Uri, Vec<Diagnostic>>,
     compile_output: Option<CompileOutput>,
     cell: Option<String>,
     gui_client: Option<GuiClient>,
-    editor_files: IndexMap<Url, Document>,
+    editor_files: IndexMap<Uri, Document>,
 }
 
 impl StateMut {
-    fn diagnostics(&self) -> IndexMap<Url, Vec<Diagnostic>> {
+    fn diagnostics(&self) -> IndexMap<Uri, Vec<Diagnostic>> {
         let mut diagnostics = IndexMap::new();
         if let Some(o) = &self.compile_output {
             let errs = match o {
@@ -87,7 +88,7 @@ impl StateMut {
                 CompileOutput::Valid(_) => vec![],
             };
             for (span, message) in errs {
-                let url = Url::from_file_path(&span.path).unwrap();
+                let url = Uri::from_file_path(&span.path).unwrap();
                 if let Some(ast) = self.ast.values().find(|ast| ast.path == span.path) {
                     let doc = Document::new(&ast.text, 0);
                     diagnostics
@@ -143,7 +144,7 @@ impl StateMut {
                         client
                             .apply_edit(WorkspaceEdit {
                                 changes: Some(HashMap::from_iter([(
-                                    Url::from_file_path(&ast.path).unwrap(),
+                                    Uri::from_file_path(&ast.path).unwrap(),
                                     text_edits,
                                 )])),
                                 document_changes: None,
@@ -285,11 +286,14 @@ impl Request for ForceSave {
     const METHOD: &'static str = "custom/forceSave";
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        self.state.state_mut.lock().await.root_dir =
-            params.root_uri.map(|root| root.to_file_path().unwrap());
+        #[allow(deprecated)]
+        {
+            self.state.state_mut.lock().await.root_dir = params
+                .root_uri
+                .map(|root| PathBuf::from(root.to_file_path().unwrap()));
+        }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -352,6 +356,9 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        if let Some(gui) = self.state.state_mut.lock().await.gui.as_mut() {
+            let _ = gui.kill().await;
+        }
         Ok(())
     }
 }
@@ -368,25 +375,47 @@ struct SetParams {
 
 impl Backend {
     async fn start_gui(&self) -> Result<()> {
+        let mut state_mut = self.state.state_mut.lock().await;
+        if let Some(gui_client) = &state_mut.gui_client {
+            self.state
+                .editor_client
+                .show_message(MessageType::LOG, "Attempting to contact existing GUI...")
+                .await;
+            if gui_client.activate(context::current()).await.is_ok() {
+                self.state
+                    .editor_client
+                    .show_message(MessageType::LOG, "Connected to existing GUI!")
+                    .await;
+                return Ok(());
+            }
+            self.state
+                .editor_client
+                .show_message(MessageType::LOG, "Failed to contact existing GUI.")
+                .await;
+        }
+        if let Some(mut gui) = state_mut.gui.take() {
+            let _ = gui.kill().await;
+        }
+
         self.state
             .editor_client
             .show_message(MessageType::LOG, "Starting the GUI...")
             .await;
-        let server_addr = self.state.server_addr;
+        let state = self.state.clone();
 
         tokio::spawn(async move {
             match Command::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../target/release/gui"
             ))
-            .arg(format!("{}", server_addr))
+            .arg(format!("{}", state.server_addr))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             {
-                Ok(child) => {
-                    if let Some(stdout) = child.stdout {
+                Ok(mut child) => {
+                    if let Some(stdout) = child.stdout.take() {
                         tokio::spawn(async move {
                             let reader = BufReader::new(stdout);
                             let mut lines = reader.lines();
@@ -396,16 +425,21 @@ impl Backend {
                             }
                         });
                     }
-                    if let Some(stderr) = child.stderr {
+                    if let Some(stderr) = child.stderr.take() {
                         tokio::spawn(async move {
                             let reader = BufReader::new(stderr);
                             let mut lines = reader.lines();
 
                             while let Ok(Some(line)) = lines.next_line().await {
                                 error!("{}", line);
+                                state
+                                    .editor_client
+                                    .show_message(MessageType::ERROR, line)
+                                    .await;
                             }
                         });
                     }
+                    state.state_mut.lock().await.gui = Some(child);
                 }
                 Err(_) => todo!(),
             }
