@@ -71,7 +71,7 @@ pub fn dynamic_compile(
             }
         }
         CompileOutput::Valid(v) => (v, Vec::new()),
-        _ => unreachable!(),
+        o => return o,
     };
     check_layers(&data, &mut errors);
     if errors.is_empty() {
@@ -2023,11 +2023,22 @@ impl<'a> ExecPass<'a> {
             _ => None,
         }) {
             let cell_id = self.execute_cell(vid, input.args, Some("TOP"));
-            let layers = klayout_lyp::from_reader(BufReader::new(
-                std::fs::File::open(input.lyp_file).unwrap(),
-            ))
-            .unwrap()
-            .into();
+            let layers = if let Ok(layers) = std::fs::File::open(input.lyp_file)
+                .map_err(|_| ())
+                .and_then(|f| klayout_lyp::from_reader(BufReader::new(f)).map_err(|_| ()))
+            {
+                layers.into()
+            } else {
+                return CompileOutput::StaticErrors(StaticErrorCompileOutput {
+                    errors: vec![StaticError {
+                        span: Span {
+                            path: self.ast[&vec![]].path.clone(),
+                            span: cfgrammar::Span::new(0, 0),
+                        },
+                        kind: StaticErrorKind::InvalidLyp,
+                    }],
+                });
+            };
             if self.errors.is_empty() {
                 CompileOutput::Valid(CompiledData {
                     cells: self.compiled_cells,
@@ -4050,6 +4061,9 @@ pub enum StaticErrorKind {
     /// Error during parsing.
     #[error("error during parsing")]
     ParseError,
+    /// Invalid LYP file.
+    #[error("invalid LYP file")]
+    InvalidLyp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
