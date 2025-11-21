@@ -71,6 +71,7 @@ pub struct Layers {
 pub struct EditorState {
     pub hierarchy_depth: usize,
     pub dark_mode: bool,
+    pub fatal_error: Option<SharedString>,
     pub solved_cell: Entity<Option<CompileOutputState>>,
     pub hide_external_geometry: bool,
     pub layers: Entity<Layers>,
@@ -236,11 +237,13 @@ impl EditorState {
                 {
                     self.lang_server_client
                         .show_message(MessageType::ERROR, "Open cell is invalid");
+                    self.fatal_error = Some(SharedString::from("open cell is invalid"));
                     return;
                 }
                 d
             }
             _ => {
+                self.fatal_error = Some(SharedString::from("static compile errors encountered"));
                 return;
             }
         };
@@ -307,6 +310,7 @@ impl EditorState {
             });
             cx.notify();
         });
+        self.fatal_error = None;
     }
 }
 
@@ -327,6 +331,7 @@ impl Editor {
             EditorState {
                 hierarchy_depth: usize::MAX,
                 dark_mode: true,
+                fatal_error: None,
                 solved_cell,
                 hide_external_geometry: false,
                 tool,
@@ -472,7 +477,45 @@ impl Render for Editor {
                     .flex_1()
                     .min_h_0()
                     .child(self.hierarchy_sidebar.clone())
-                    .child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
+                    .child({
+                        let mut d = div()
+                            .flex_1()
+                            .relative()
+                            .overflow_hidden()
+                            .child(self.canvas.clone());
+
+                        if let Some(fatal_error) = &self.state.read(cx).fatal_error {
+                            d = d.child(
+                                div()
+                                    .id("error_modal")
+                                    .bg(theme.bg)
+                                    .border_1()
+                                    .border_color(theme.divider)
+                                    .rounded_sm()
+                                    .absolute()
+                                    .p_2()
+                                    .child(
+                                        div().flex().flex_row().text_color(theme.error).child(
+                                            div().flex().flex_col().child(div().flex_1()).child(
+                                            svg()
+                                                .path("icons/circle-exclamation-solid-full.svg")
+                                                .w(px(20.))
+                                                .h_auto()
+                                                .mr_1()
+                                                .text_color(theme.error)).child(div().flex_1())
+                                        )
+                                        .child(div().child("Error"))
+                                    )
+                                    .child(format!("Editing disabled due to error: {fatal_error}."))
+                                    .whitespace_normal()
+                                    .top_2()
+                                    .left_2()
+                                    .right_2()
+                            );
+                        }
+
+                        d
+                    })
                     .child(self.layer_sidebar.clone()),
             )
             .child(self.text_input.clone())
