@@ -90,5 +90,3 @@ node_modules
 .vscode-test
 *.tsbuildinfo
 
-# Ignore timing files
-*.txt

@@ -1,10 +1,10 @@
-pub mod SPQR;
 pub mod ast;
 pub mod compile;
 pub mod config;
 pub mod layer;
 pub mod parse;
 pub mod solver;
+pub mod spqr;
 
 #[cfg(test)]
 mod tests {

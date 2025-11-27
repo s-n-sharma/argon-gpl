@@ -9,7 +9,7 @@ cell vias() {
     eq(via.x0, 0.);
     eq(via.y0, 0.);
     let intersection = #scope0 std::intersection(met1, met2);
-    let via_array = #scope1 std::max_array(via, intersection.w, intersection.h, 3., 3.);
+    let via_array = #scope1 std::max_array(via, intersection.w, intersection.h, 20., 20.);
     eq(via_array.x0 - intersection.x0, intersection.x1 - via_array.x1);
     eq(via_array.y0 - intersection.y0, intersection.y1 - via_array.y1);
 
@@ -22,6 +22,4 @@ cell vias() {
     eq(met1.y0, 5.);
     eq(met1.x1, 95.);
     eq(met1.y1, 95.);
-    let rect0 = rect("met1", x0i = -29.56587600708008, y0i = 22.63188362121582, x1i = -7.944691181182861, y1i = 88.01577758789063)!;
-    let rect1 = rect("met1", x0i = 3.6970133781433105, y0i = 105.2800064086914, x1i = 89.15843963623047, y1i = 123.6207046508789)!;
 }

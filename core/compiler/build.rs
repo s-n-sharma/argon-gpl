@@ -1,7 +1,8 @@
-use cfgrammar::yacc::YaccKind;
-use lrlex::CTLexerBuilder;
 use std::env;
 use std::path::PathBuf;
+
+use cfgrammar::yacc::YaccKind;
+use lrlex::CTLexerBuilder;
 
 fn main() {
     CTLexerBuilder::new()
@@ -85,5 +86,5 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("spqr_bindings.rs"))
-        .expect("Couldn't write bindings!");
+        .expect("Couldn't write bindings");
 }

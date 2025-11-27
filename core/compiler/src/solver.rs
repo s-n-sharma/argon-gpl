@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use indexmap::{IndexMap, IndexSet};
 use itertools::{Either, Itertools};
+use nalgebra::DVector;
+use nalgebra_sparse::{CooMatrix, CsrMatrix};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 const EPSILON: f64 = 1e-10;
@@ -10,7 +13,7 @@ const INV_ROUND_STEP: f64 = 1. / ROUND_STEP;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct Var(u64);
-use crate::SPQR::SpqrFactorization;
+use crate::spqr::SpqrFactorization;
 
 #[derive(Clone, Default)]
 pub struct Solver {
@@ -84,13 +87,9 @@ impl Solver {
         id
     }
 
+    /// Solves for as many variables as possible and substitutes their values into existing constraints.
+    /// Deletes constraints that no longer contain unsolved variables.
     pub fn solve(&mut self) {
-        use std::time::Instant;
-        let start_time = Instant::now();
-        use nalgebra::DVector;
-        use nalgebra_sparse::{CooMatrix, CsrMatrix};
-        use rayon::prelude::*;
-
         let n_vars = self.next_var as usize;
         if n_vars == 0 || self.constraints.is_empty() {
             return;
@@ -120,8 +119,8 @@ impl Solver {
             used[*v_index] = true;
         }
 
-        let mut var_map = vec![usize::MAX; n_vars]; //og matrix -> shrunk matrix
-        let mut rev_var_map = Vec::with_capacity(n_vars); //shrunk matrix -> og matrix
+        let mut var_map = vec![usize::MAX; n_vars];
+        let mut rev_var_map = Vec::with_capacity(n_vars);
         let mut new_index = 0;
 
         for (old_index, &is_used) in used.iter().enumerate() {
@@ -202,25 +201,6 @@ impl Solver {
         }
         self.constraints
             .retain(|constraint| !constraint.expr.coeffs.is_empty());
-
-        let elapsed_time = start_time.elapsed();
-
-        use std::fs::OpenOptions;
-        use std::io::Write;
-
-        let time_str = format!(
-            "time taken on {row}x{col} with rank={ran}: {:?}\n",
-            elapsed_time,
-            row = m,
-            col = n,
-            ran = rank,
-        );
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open("spqr_time_n_size.txt")
-            .unwrap();
-        file.write_all(time_str.as_bytes()).unwrap();
     }
 
     pub fn value_of(&self, var: Var) -> Option<f64> {
@@ -386,7 +366,7 @@ mod tests {
             constant: 0.,
         });
         solver.solve();
-        assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), 5., epsilon = EPSILON);
         assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
         assert!(!solver.solved_vars.contains_key(&z));
     }

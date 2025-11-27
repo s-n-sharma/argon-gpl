@@ -69,47 +69,4 @@ cell inverter(nw: Float, pw: Float) {
     let cons = crect(x0=vdd_ntap.x0, x1=vdd_ntap.x1, y0=vdd_ntap.y0+80., y1=vdd_ntap.y1-80.);
     let r = #scope10 std::max_array(licon, cons.w, cons.h, 340., 340.);
     #scope11 std::center_rects(r, cons);
-
-    let met2 = rect("met2");
-    let met1 = rect("met1");
-
-    // Create via.
-    let via = crect(layer="via1");
-    eq(via.w, 10.);
-    eq(via.h, 10.);
-    eq(via.x0, 0.);
-    eq(via.y0, 0.);
-    let intersection = #scope12 std::intersection(met1, met2);
-    let via_array = #scope13 std::max_array(via, intersection.w, intersection.h, 3., 3.);
-    eq(via_array.x0 - intersection.x0, intersection.x1 - via_array.x1);
-    eq(via_array.y0 - intersection.y0, intersection.y1 - via_array.y1);
-
-    // Constrain metals.
-    eq(met2.x0, 0.);
-    eq(met2.y0, 0.);
-    eq(met2.x1, 100.);
-    eq(met2.y1, 100.);
-    eq(met1.x0, 5.);
-    eq(met1.y0, 5.);
-    eq(met1.x1, 95.);
-    eq(met1.y1, 95.);
-    let rect0 = rect("met1", x0i = -29.56587600708008, y0i = 22.63188362121582, x1i = -7.944691181182861, y1i = 88.01577758789063)!;
-    let rect1 = rect("met1", x0i = 3.6970133781433105, y0i = 105.2800064086914, x1i = 89.15843963623047, y1i = 123.6207046508789)!;
-    let rect2 = rect("vhvi.drawing", x0i = 875.4197998046875, y0i = 294.7478332519531, x1i = 1259.5162353515625, y1i = 697.4769287109375)!;
-    let rect3 = rect("vhvi.drawing", x0i = 1386.7406005859375, y0i = 1168.386962890625, x1i = 2823.3994140625, y1i = 2191.741455078125)!;
-   
-    let rect4 = rect("pwelliso.label", x0i = -471.7958068847656, y0i = 201.153564453125, x1i = -157.2433319091797, y1i = 604.0382690429688)!;
-    let rect5 = rect("pwelliso.pin", x0i = 1503.6966552734375, y0i = 61.07021713256836, x1i = 2227.78515625, y1i = 559.447998046875)!;
-    let rect6 = rect("pwelliso.pin", x0i = 1308.1982421875, y0i = -776.9732666015625, x1i = 2036.9593505859375, y1i = -110.4232406616211)!;
-    let rect7 = rect("pwelliso.pin", x0i = 1464.7952880859375, y0i = -1703.5506591796875, x1i = 2210.929443359375, y1i = -997.4939575195313)!;
-    let rect8 = rect("pwelliso.pin", x0i = -1473.8768310546875, y0i = -1328.6632080078125, x1i = -696.81298828125, y1i = -229.54722595214844)!;
-    let rect9 = rect("pwelliso.pin", x0i = -513.7101440429688, y0i = -617.4952392578125, x1i = -374.5174255371094, y1i = 16.96132469177246)!;
-    let rect10 = rect("nwell.pin", x0i = 1539.1419677734375, y0i = 626.6474609375, x1i = 10812.208984375, y1i = 1904.1240234375)!;
-    let rect11 = rect("pwelliso.pin", x0i = -2668.917724609375, y0i = 1179.3330078125, x1i = -1165.5086669921875, y1i = 2380.923828125)!;
-    let rect12 = rect("pwelliso.pin", x0i = -3099.79833984375, y0i = -183.42257690429688, x1i = -1678.7188720703125, y1i = 920.8671875)!;
-    let rect13 = rect("pwelliso.pin", x0i = -1196.2757568359375, y0i = 2569.588623046875, x1i = -399.684814453125, y1i = 2819.418212890625)!;
-    let rect14 = rect("pwelliso.pin", x0i = -1450.3665771484375, y0i = 6.54901647567749, x1i = -750.1393432617188, y1i = 1005.6682739257813)!;
-    let rect15 = rect("pwelliso.pin", x0i = 2659.29248046875, y0i = -825.86572265625, x1i = 3550.400390625, y1i = 317.5717468261719)!;
-    let rect16 = rect("pwelliso.pin", x0i = -2724.45751953125, y0i = -1622.8543701171875, x1i = -1750.167724609375, y1i = -440.4396057128906)!;
-    let rect17 = rect("nwell.pin", x0i = 2729.86181640625, y0i = -723.175537109375, x1i = 3465.595703125, y1i = 206.1963348388672)!;
 }
