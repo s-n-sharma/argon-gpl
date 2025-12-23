@@ -1854,7 +1854,7 @@ struct ExecScope {
 struct FallbackConstraint {
     priority: i32,
     constraint: LinearExpr,
-    // span: Span,
+    span: Span,
 }
 
 impl PartialEq for FallbackConstraint {
@@ -2202,8 +2202,9 @@ impl<'a> ExecPass<'a> {
                 }
                 let mut constraint_added = false;
                 let state = self.cell_state_mut(cell_id);
-                while let Some(FallbackConstraint { constraint, .. }) =
-                    state.fallback_constraints.pop()
+                while let Some(FallbackConstraint {
+                    constraint, span, ..
+                }) = state.fallback_constraints.pop()
                 {
                     if constraint
                         .coeffs
@@ -2212,7 +2213,7 @@ impl<'a> ExecPass<'a> {
                     {
                         state.fallback_constraints_used.push(constraint.clone());
                         let constraint_id = state.solver.constrain_eq0(constraint);
-                        state.constraint_span_map.insert(constraint_id);
+                        state.constraint_span_map.insert(constraint_id, span);
                         constraint_added = true;
                         break;
                     }
@@ -2231,18 +2232,28 @@ impl<'a> ExecPass<'a> {
                 require_progress = true;
             }
         }
-        let state = self.cell_state_mut(cell_id);
-        if progress {
-            state.solve_iters += 1;
-            state.solver.solve();
-        }
-        for constraint in state.solver.inconsistent_constraints().clone() {
-            self.errors.push(ExecError {
-                span: state.constraint_span_map.get(&cell_id),
-                cell: cell_id,
-                kind: ExecErrorKind::InconsistentConstraint(constraint),
-            });
-        }
+
+        let inconsistent_errors = {
+            let state = self.cell_state_mut(cell_id);
+            if progress {
+                state.solve_iters += 1;
+                state.solver.solve();
+            }
+
+            state
+                .solver
+                .inconsistent_constraints()
+                .clone()
+                .into_iter()
+                .map(|constraint| ExecError {
+                    span: state.constraint_span_map.get(&constraint).cloned(),
+                    cell: cell_id,
+                    kind: ExecErrorKind::InconsistentConstraint(constraint),
+                })
+                .collect::<Vec<_>>()
+        };
+        self.errors.extend(inconsistent_errors);
+
         self.partial_cells
             .pop_back()
             .expect("failed to pop cell id");
@@ -2874,6 +2885,7 @@ impl<'a> ExecPass<'a> {
                                 }
                                 x => unreachable!("unsupported kwarg `{x}`"),
                             };
+                            let span = self.span(&vref.loc, kwarg.span);
                             let defer = self.value_id();
                             self.values.insert(
                                 defer,
@@ -2883,6 +2895,7 @@ impl<'a> ExecPass<'a> {
                                         rhs: *rhs,
                                         fallback: kwarg.name.name.ends_with('i'),
                                         priority,
+                                        span,
                                     }),
                                     loc: vref.loc,
                                 }),
@@ -2981,7 +2994,13 @@ impl<'a> ExecPass<'a> {
                             - vr.as_ref().unwrap_linear().clone();
                         let constraint = state.solver.constrain_eq0(expr);
 
-                        state.constraint_span_map.insert(constraint);
+                        state.constraint_span_map.insert(
+                            constraint,
+                            Span {
+                                path: state.scopes[&vref.loc.scope].span.path.clone(),
+                                span: c.expr.span,
+                            },
+                        );
                         self.values.insert(vid, Defer::Ready(Value::Nil));
                         true
                     } else {
@@ -3066,7 +3085,7 @@ impl<'a> ExecPass<'a> {
                             constraint,
                             span: Some(span.clone()),
                         };
-                        state.constraint_span_map.insert(constraint);
+                        state.constraint_span_map.insert(constraint, span.clone());
                         state.object_emit.push(ObjectEmit {
                             scope: vref.loc.scope,
                             object: dim.id,
@@ -3197,6 +3216,7 @@ impl<'a> ExecPass<'a> {
                                 }
                                 _ => continue,
                             };
+                            let span = self.span(&vref.loc, kwarg.span);
                             let defer = self.value_id();
                             self.values.insert(
                                 defer,
@@ -3206,6 +3226,7 @@ impl<'a> ExecPass<'a> {
                                         rhs: *rhs,
                                         fallback: kwarg.name.name.ends_with('i'),
                                         priority,
+                                        span,
                                     }),
                                     loc: vref.loc,
                                 }),
@@ -3637,10 +3658,11 @@ impl<'a> ExecPass<'a> {
                         state.fallback_constraints.push(FallbackConstraint {
                             priority: c.priority,
                             constraint: expr,
+                            span: c.span.clone(),
                         });
                     } else {
                         let constraint = state.solver.constrain_eq0(expr);
-                        state.constraint_span_map.insert(constraint);
+                        state.constraint_span_map.insert(constraint, c.span.clone());
                     }
                     self.values.insert(vid, DeferValue::Ready(Value::Nil));
                     true
@@ -4177,7 +4199,7 @@ struct PartialConstraint {
     rhs: ValueId,
     fallback: bool,
     priority: i32,
-    // span: Span,
+    span: Span,
 }
 
 #[derive(Debug, Clone)]
