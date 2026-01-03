@@ -370,4 +370,102 @@ mod tests {
         assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
         assert!(!solver.solved_vars.contains_key(&z));
     }
+
+    #[test]
+    fn linear_constraints_solved_correctly_two() {
+        let mut solver = Solver::new();
+        let x = solver.new_var();
+        let y = solver.new_var();
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x)],
+            constant: -3.,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., y)],
+            constant: -5.,
+        });
+        solver.solve();
+        assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), 3., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
+    }
+
+    #[test]
+    fn linear_constraints_solved_correctly_three() {
+        let mut solver = Solver::new();
+        let x = solver.new_var();
+        let y = solver.new_var();
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x), (1., y)],
+            constant: -3.,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., y)],
+            constant: -5.,
+        });
+        solver.solve();
+        assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), -2., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 5., epsilon = EPSILON);
+    }
+
+    #[test]
+    fn linear_constraints_solved_correctly_four() {
+        let mut solver = Solver::new();
+        let x = solver.new_var();
+        let y = solver.new_var();
+        let z = solver.new_var();
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(2., x), (1., y), (1., z)],
+            constant: -3.,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x), (2., y), (1., z)],
+            constant: -5.,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x), (1., y), (2., z)],
+            constant: -8.,
+        });
+        solver.solve();
+        assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), -1., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 1., epsilon = EPSILON);
+        assert_relative_eq!(*solver.solved_vars.get(&z).unwrap(), 4., epsilon = EPSILON);
+    }
+
+    #[test]
+    fn linear_constraints_solved_correctly_five() {
+        let mut solver = Solver::new();
+        let x = solver.new_var();
+        let y = solver.new_var();
+        let z = solver.new_var();
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(2., x), (1., y), (1., z)],
+            constant: -0.03,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x), (2., y), (1., z)],
+            constant: -0.05,
+        });
+        solver.constrain_eq0(LinearExpr {
+            coeffs: vec![(1., x), (1., y), (2., z)],
+            constant: -0.08,
+        });
+        solver.solve();
+        assert_relative_eq!(
+            *solver.solved_vars.get(&x).unwrap(),
+            -0.01,
+            epsilon = EPSILON
+        );
+        assert_relative_eq!(
+            *solver.solved_vars.get(&y).unwrap(),
+            0.01,
+            epsilon = EPSILON
+        );
+        assert_relative_eq!(
+            *solver.solved_vars.get(&z).unwrap(),
+            0.04,
+            epsilon = EPSILON
+        );
+    }
+
+    //big matrix
 }
