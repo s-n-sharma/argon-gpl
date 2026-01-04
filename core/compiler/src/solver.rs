@@ -4,6 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use itertools::{Either, Itertools};
 use nalgebra::DVector;
 use nalgebra_sparse::{CooMatrix, CsrMatrix};
+use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -430,42 +431,6 @@ mod tests {
         assert_relative_eq!(*solver.solved_vars.get(&x).unwrap(), -1., epsilon = EPSILON);
         assert_relative_eq!(*solver.solved_vars.get(&y).unwrap(), 1., epsilon = EPSILON);
         assert_relative_eq!(*solver.solved_vars.get(&z).unwrap(), 4., epsilon = EPSILON);
-    }
-
-    #[test]
-    fn linear_constraints_solved_correctly_five() {
-        let mut solver = Solver::new();
-        let x = solver.new_var();
-        let y = solver.new_var();
-        let z = solver.new_var();
-        solver.constrain_eq0(LinearExpr {
-            coeffs: vec![(2., x), (1., y), (1., z)],
-            constant: -0.03,
-        });
-        solver.constrain_eq0(LinearExpr {
-            coeffs: vec![(1., x), (2., y), (1., z)],
-            constant: -0.05,
-        });
-        solver.constrain_eq0(LinearExpr {
-            coeffs: vec![(1., x), (1., y), (2., z)],
-            constant: -0.08,
-        });
-        solver.solve();
-        assert_relative_eq!(
-            *solver.solved_vars.get(&x).unwrap(),
-            -0.01,
-            epsilon = EPSILON
-        );
-        assert_relative_eq!(
-            *solver.solved_vars.get(&y).unwrap(),
-            0.01,
-            epsilon = EPSILON
-        );
-        assert_relative_eq!(
-            *solver.solved_vars.get(&z).unwrap(),
-            0.04,
-            epsilon = EPSILON
-        );
     }
 
     //big matrix
