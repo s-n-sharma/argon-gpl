@@ -1,6 +1,5 @@
 # Argon
-
-[![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 
 Argon is a programming language for writing constraint-based integrated circuit layout generators.
 Argon's primary feature is bidirectional editing between a code editor (Neovim or VS Code) and a custom GUI.
